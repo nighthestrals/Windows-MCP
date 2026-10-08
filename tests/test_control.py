@@ -424,6 +424,25 @@ def test_user_activity_gates_new_calls():
     assert exc.value.code == "USER_ACTIVE"
 
 
+def test_pending_exit_is_visible_to_the_control_thread():
+    owner = ready_controller()
+    assert owner._has_pending_gesture() is False
+    owner.request_exit()
+    assert owner._has_pending_gesture() is True
+    owner._apply_gesture_requests()
+    assert owner._has_pending_gesture() is False
+    assert owner.status()["state"] == "disabled"
+
+
+def test_resume_drops_stale_requests():
+    owner = ready_controller()
+    owner.request_exit()
+    owner._apply_gesture_requests()
+    owner._pause_requested = True
+    assert owner.exit_disabled() is True
+    assert owner._has_pending_gesture() is False
+
+
 def test_soft_exit_disables_tools_until_resumed():
     owner = ready_controller()
     owner.request_exit()

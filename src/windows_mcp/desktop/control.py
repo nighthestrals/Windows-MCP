@@ -457,6 +457,11 @@ class ControlCoordinator:
         with self._lock:
             if self._state != "disabled":
                 return False
+            # Drop anything queued while disabled so a stale exit cannot fire
+            # immediately after the user resumed.
+            self._pause_requested = False
+            self._resume_requested = False
+            self._exit_requested = False
             self._resume_observation_required = True
             self._last_user = 0.0
             self._last_physical_event = 0.0
@@ -483,6 +488,10 @@ class ControlCoordinator:
         elif self._state == "paused":
             self._resume_requested = True
             self._release_requested.set()
+
+    def _has_pending_gesture(self) -> bool:
+        """True when any user gesture is waiting for the control thread."""
+        return self._pause_requested or self._resume_requested or self._exit_requested
 
     def _apply_gesture_requests(self) -> None:
         exit_requested = self._exit_requested
@@ -739,9 +748,11 @@ class ControlCoordinator:
             if self._emergency:
                 self._mark_unavailable()
                 continue
-            if self._pause_requested or self._resume_requested:
+            if self._has_pending_gesture():
                 # Gestures run here, off the hook thread, because a pause may
-                # have to lift AI-held keys with SendInput.
+                # have to lift AI-held keys with SendInput. The exit request must
+                # be part of this test: otherwise a lone exit stays pending until
+                # an unrelated pause arrives and then fired unexpectedly.
                 self._apply_gesture_requests()
                 continue
             now = time.monotonic()
