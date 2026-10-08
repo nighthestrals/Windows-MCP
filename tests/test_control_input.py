@@ -173,7 +173,9 @@ def test_movement_after_checkpoint_keeps_the_ledger_open(monkeypatch):
     assert actions == ["down"]
     owner._handle(owner._events.get_nowait())
     assert owner.status()["state"] == "ai"
-    owner.checkpoint(token)
+    with pytest.raises(control.ControlBlocked) as exc:
+        owner.checkpoint(token)
+    assert exc.value.code == "USER_ACTIVE"
 
 
 @pytest.mark.parametrize("action", ["scroll", "drag", "multi_select"])

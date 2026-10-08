@@ -84,6 +84,10 @@
       "description": "Reports whether AI or the user currently controls the desktop and the remaining user-idle wait before AI control can resume. This read-only status remains available during user takeover."
     },
     {
+      "name": "ControlResume",
+      "description": "Re-enables desktop control after the user stopped it with the exit hotkey. Call it only when the user explicitly asks to resume; confirm=true is required and the first call afterwards must be Snapshot."
+    },
+    {
       "name": "App",
       "description": "Manages Windows applications with three modes: 'launch' (opens the prescibed application), 'resize' (adjusts the size/position of a named window or the active window if name is omitted), 'switch' (brings specific window into focus)."
     },

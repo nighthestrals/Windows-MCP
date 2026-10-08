@@ -22,4 +22,17 @@ def register(mcp, *, get_desktop, get_analytics):
         ),
     )
     def control_status_tool() -> dict:
-        return get_controller().status()
+        status = get_controller().status()
+        try:
+            from windows_mcp.desktop.hotkeys import get_hotkeys
+
+            status["hotkeys"] = get_hotkeys().status()
+        except Exception:
+            pass
+        try:
+            from windows_mcp.desktop.input_poll import get_poller
+
+            status["cursor_poll"] = get_poller().status()
+        except Exception:
+            pass
+        return status

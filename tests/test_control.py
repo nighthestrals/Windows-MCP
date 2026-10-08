@@ -178,15 +178,21 @@ def test_start_ignores_recent_physical_input(monkeypatch):
         owner.stop()
 
 
-def test_physical_movement_warns_but_never_preempts():
+def test_physical_movement_warns_and_makes_the_agent_yield():
     owner = ready_controller()
     token = owner.begin_call("Click")
     owner.mark_user_move()
     owner._handle(("point", 100, 100, 0x200))
     owner._handle(("point", 2200, 1400, 0x200))
-    assert owner.status()["state"] == "ai"
-    assert owner.status()["flashing"] is True
-    owner.checkpoint(token)  # Movement never takes the lease away.
+    status = owner.status()
+    assert status["state"] == "ai"
+    assert status["flashing"] is True
+    assert status["user_active"] is True
+    # Movement no longer transfers ownership, but the agent stops at the next
+    # step so it cannot fight the user for the shared pointer.
+    with pytest.raises(control.ControlBlocked) as exc:
+        owner.checkpoint(token)
+    assert exc.value.code == "USER_ACTIVE"
 
 
 def test_raw_mouse_movement_keeps_ownership():
@@ -349,10 +355,12 @@ def test_physical_move_is_swallowed_and_only_flashes(monkeypatch):
     data = control._MouseHookData()
     data.pt.x, data.pt.y = 10, 20
     assert owner._physical_mouse(0, 0x200, ctypes.addressof(data)) == 1
-    owner.checkpoint(token)  # The AI keeps the desktop while the call runs.
     owner._handle(owner._events.get_nowait())
     assert owner.status()["state"] == "ai"
     assert owner.status()["flashing"] is True
+    with pytest.raises(control.ControlBlocked) as exc:
+        owner.checkpoint(token)
+    assert exc.value.code == "USER_ACTIVE"
 
 
 def test_swallowed_physical_down_does_not_skip_ai_release(monkeypatch):
@@ -405,3 +413,37 @@ def test_watchdog_cannot_refresh_if_coordinator_lock_is_held(monkeypatch):
     finally:
         owner._lock.release()
     assert owner._emergency and not owner._suppress
+
+
+def test_user_activity_gates_new_calls():
+    owner = ready_controller()
+    owner.mark_user_move()
+    assert owner.status()["user_active"] is True
+    with pytest.raises(control.ControlBlocked) as exc:
+        owner.begin_call("Click")
+    assert exc.value.code == "USER_ACTIVE"
+
+
+def test_soft_exit_disables_tools_until_resumed():
+    owner = ready_controller()
+    owner.request_exit()
+    owner._apply_gesture_requests()
+    assert owner.status()["state"] == "disabled"
+    with pytest.raises(control.ControlBlocked) as exc:
+        owner.begin_call("Click")
+    assert exc.value.code == "CONTROL_DISABLED"
+    assert owner.exit_disabled() is True
+    status = owner.status()
+    assert status["state"] == "ready"
+    assert status["resume_observation_required"] is True
+
+
+def test_pause_toggle_follows_the_ownership_state():
+    owner = ready_controller()
+    owner.begin_call("Wait")
+    owner.request_pause_toggle()
+    assert owner._pause_requested is True
+    owner._pause_requested = False
+    assert owner.pause_by_user() is True
+    owner.request_pause_toggle()
+    assert owner._resume_requested is True

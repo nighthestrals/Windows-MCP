@@ -207,7 +207,7 @@ class ControlToolGate(Middleware):
     async def on_call_tool(self, context: MiddlewareContext, call_next: Callable) -> Any:
         self.notifier.remember(context)
         name = context.message.name
-        if name == "ControlStatus":
+        if name in ("ControlStatus", "ControlResume"):
             return await call_next(context)
         # Waiting behind an already running external command must not hide a
         # user takeover. Poll ownership while waiting, then recheck under lock.

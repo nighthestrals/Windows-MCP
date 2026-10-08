@@ -424,6 +424,15 @@ async def test_overlay_callback_never_waits_on_hook_thread(monkeypatch):
         def flash_active(self):
             return False
 
+        def mark_user_move(self):
+            pass
+
+        def request_pause_toggle(self):
+            pass
+
+        def request_exit(self):
+            pass
+
     class Desktop:
         tree = type("Tree", (), {"on_focus_change": lambda *args: None})()
 
@@ -467,6 +476,49 @@ async def test_overlay_callback_never_waits_on_hook_thread(monkeypatch):
         "set_pending",
         lambda active, *, generation=None: calls.append(("pending", active)),
     )
+
+    from windows_mcp.desktop import hotkeys as hotkey_module, input_poll as poll_module
+
+    class FakeHotkeys:
+        def configure(self, **kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def enable(self):
+            return True
+
+        def disable(self):
+            return True
+
+        def status(self):
+            return {"registered": False}
+
+    class FakePoller:
+        def __init__(self):
+            self.enabled = False
+
+        def configure(self, **kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def set_enabled(self, enabled):
+            self.enabled = enabled
+
+        def status(self):
+            return {"enabled": self.enabled}
+
+    monkeypatch.setattr(hotkey_module, "get_hotkeys", lambda: FakeHotkeys())
+    monkeypatch.setattr(poll_module, "get_poller", lambda: FakePoller())
 
     mcp = wm._build_mcp()
     callback = controller.listeners[0]

@@ -26,6 +26,8 @@ import comtypes.client
 from _ctypes import COMError
 from typing import Any, Callable, Dict, Generator, List, Tuple
 
+from windows_mcp.input_activity import mark_injection
+
 
 METRO_WINDOW_CLASS_NAME = "Windows.UI.Core.CoreWindow"  # for Windows 8 and 8.1
 SEARCH_INTERVAL = 0.5  # search control interval seconds
@@ -203,6 +205,7 @@ def SetCursorPos(x: int, y: int) -> bool:
     y: int.
     Return bool, True if succeed otherwise False.
     """
+    mark_injection()
     return bool(ctypes.windll.user32.SetCursorPos(x, y))
 
 
@@ -1375,6 +1378,7 @@ def SendInput(*inputs) -> int:
     Return int, the number of events that it successfully inserted into the keyboard or mouse input stream.
                 If the function returns zero, the input was already blocked by another thread.
     """
+    mark_injection()
     cbSize = ctypes.c_int(ctypes.sizeof(INPUT))
     for ip in inputs:
         ret = ctypes.windll.user32.SendInput(1, ctypes.byref(ip), cbSize)

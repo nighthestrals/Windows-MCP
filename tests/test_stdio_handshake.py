@@ -47,6 +47,7 @@ EXPECTED_TOOLS = {
     "App",
     "Click",
     "Clipboard",
+    "ControlResume",
     "ControlStatus",
     "DisplayInventory",
     "FileSystem",

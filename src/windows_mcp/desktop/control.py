@@ -28,6 +28,10 @@ from windows_mcp.desktop.control_win32 import (
 # movement keeps the warning on screen.
 _FLASH_SECONDS = 0.6
 
+# How long the agent keeps yielding after the user last moved the cursor. The
+# cursor poller refreshes it on every sample while the user keeps moving.
+_USER_ACTIVE_SECONDS = 1.5
+
 
 class ControlBlocked(RuntimeError):
     def __init__(self, code: str, status: dict):
@@ -92,6 +96,8 @@ class ControlCoordinator:
         self._last_click_at = 0.0
         self._last_click_pos = (0, 0)
         self._gesture_swallow_until = 0.0
+        self._user_active_until = 0.0
+        self._exit_requested = False
 
     def subscribe(self, callback: Callable[[dict], None]) -> None:
         with self._lock:
@@ -178,6 +184,7 @@ class ControlCoordinator:
             "lease_seconds_remaining": round(lease, 3),
             "resume_observation_required": self._resume_observation_required,
             "flashing": self._flash_until > now,
+            "user_active": self._user_active_until > now,
         }
 
     def status(self) -> dict:
@@ -230,8 +237,8 @@ class ControlCoordinator:
         return True
 
     def _tick_locked(self, now: float) -> bool:
-        if self._state == "paused":
-            # Only an explicit resume gesture leaves the paused state.
+        if self._state in ("paused", "disabled"):
+            # Only an explicit resume gesture (or ControlResume) leaves these.
             return False
         if (
             self._state == "user"
@@ -262,6 +269,10 @@ class ControlCoordinator:
             changed = self._set_locked("unavailable") if self._emergency else self._tick_locked(now)
             if self._pressed or self._mouse_down:
                 raise ControlBlocked("PHYSICAL_INPUT_HELD", self._snapshot_locked(now))
+            if self._user_active_until > now:
+                # The user is moving the cursor right now: the agent yields until
+                # they stop instead of fighting over the same pointer.
+                raise ControlBlocked("USER_ACTIVE", self._snapshot_locked(now))
             if (
                 self._emergency
                 or self._fast_takeover
@@ -275,6 +286,7 @@ class ControlCoordinator:
                     "user": "USER_CONTROL",
                     "takeover_pending": "TAKEOVER_PENDING",
                     "paused": "USER_PAUSED",
+                    "disabled": "CONTROL_DISABLED",
                 }.get(status["state"], "CONTROL_UNAVAILABLE")
                 raise ControlBlocked(code, status)
             try:
@@ -300,6 +312,14 @@ class ControlCoordinator:
 
     def checkpoint(self, token: int) -> None:
         with self._lock:
+            if self._state == "disabled":
+                status = self._snapshot_locked(time.monotonic())
+                status["executed_steps"] = get_step_count()
+                raise ControlBlocked("CONTROL_DISABLED", status)
+            if self._user_active_until > time.monotonic():
+                status = self._snapshot_locked(time.monotonic())
+                status["executed_steps"] = get_step_count()
+                raise ControlBlocked("USER_ACTIVE", status)
             if self._state == "paused":
                 status = self._snapshot_locked(time.monotonic())
                 status["executed_steps"] = get_step_count()
@@ -358,8 +378,10 @@ class ControlCoordinator:
             self._notify(result)
 
     def mark_user_move(self) -> None:
-        """Called from the input hook: keep the yellow warning flash alive."""
-        self._flash_until = time.monotonic() + _FLASH_SECONDS
+        """Called from the hook or the cursor poller: the user is moving the mouse."""
+        now = time.monotonic()
+        self._flash_until = now + _FLASH_SECONDS
+        self._user_active_until = now + _USER_ACTIVE_SECONDS
 
     def flash_active(self) -> bool:
         return self._flash_until > time.monotonic()
@@ -376,6 +398,53 @@ class ControlCoordinator:
             self._generation += 1
             result = self._snapshot_locked(time.monotonic())
         self._notify(result)
+
+    def user_active(self) -> bool:
+        """True while the user recently moved the cursor."""
+        return self._user_active_until > time.monotonic()
+
+    def request_pause_toggle(self) -> None:
+        """Global pause hotkey or shake gesture: pause or resume."""
+        if self._state == "ai":
+            self._pause_requested = True
+        elif self._state == "paused":
+            self._resume_requested = True
+        else:
+            return
+        self._release_requested.set()
+
+    def request_exit(self) -> None:
+        """Global exit hotkey: stop desktop control until ControlResume."""
+        self._exit_requested = True
+        self._release_requested.set()
+
+    def enter_disabled(self) -> bool:
+        """Soft exit: give the desktop back and refuse tools until resumed."""
+        with self._lock:
+            self.input_ledger.block_new()
+            changed = self._set_locked("disabled")
+            result = self._snapshot_locked(time.monotonic())
+        try:
+            self.input_ledger.release_all()
+        except Exception:
+            pass
+        if changed:
+            self._notify(result)
+        return True
+
+    def exit_disabled(self) -> bool:
+        """Explicit resume after a soft exit; the next call must re-observe."""
+        with self._lock:
+            if self._state != "disabled":
+                return False
+            self._resume_observation_required = True
+            self._last_user = 0.0
+            self._last_physical_event = 0.0
+            changed = self._set_locked("ready")
+            result = self._snapshot_locked(time.monotonic())
+        if changed:
+            self._notify(result)
+        return True
 
     def request_gesture(self) -> None:
         """Called from the input hook: schedule the pause/resume toggle."""
@@ -396,10 +465,15 @@ class ControlCoordinator:
             self._release_requested.set()
 
     def _apply_gesture_requests(self) -> None:
+        exit_requested = self._exit_requested
         pause = self._pause_requested
         resume = self._resume_requested
+        self._exit_requested = False
         self._pause_requested = False
         self._resume_requested = False
+        if exit_requested:
+            self.enter_disabled()
+            return
         if pause:
             self.pause_by_user()
         if resume:

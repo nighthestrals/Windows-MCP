@@ -3,6 +3,7 @@
 from windows_mcp.tools import (
     app,
     clipboard,
+    control_resume,
     control_status,
     display,
     filesystem,
@@ -18,6 +19,7 @@ from windows_mcp.tools import (
 
 _MODULES = [
     control_status,
+    control_resume,
     app,
     display,
     shell,

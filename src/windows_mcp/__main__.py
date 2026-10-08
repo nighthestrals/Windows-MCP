@@ -261,11 +261,25 @@ def _build_mcp() -> FastMCP:
     from windows_mcp.tools.control_notifications import ControlNotifier, ControlToolGate
     from windows_mcp.desktop.control import get_controller
     from windows_mcp.desktop import control_overlay
+    from windows_mcp.desktop.hotkeys import get_hotkeys
+    from windows_mcp.desktop.input_poll import get_poller
 
     controller = get_controller()
     notifier = ControlNotifier(controller)
     _control_notifier = notifier
     control_loop: asyncio.AbstractEventLoop | None = None
+
+    hotkeys = get_hotkeys()
+    poller = get_poller()
+    hotkeys.configure(
+        on_pause=controller.request_pause_toggle,
+        on_exit=controller.request_exit,
+    )
+    poller.configure(
+        on_move=controller.mark_user_move,
+        on_shake=controller.request_pause_toggle,
+    )
+    engaged = {"value": False}
 
     def apply_control_state(status: dict) -> None:
         try:
@@ -291,6 +305,16 @@ def _build_mcp() -> FastMCP:
                 control_overlay.set_mode("paused", generation=generation)
             else:
                 control_overlay.set_active(False, generation=generation)
+            # The global hotkeys are exclusive, so they are held only while the
+            # AI owns the desktop or is paused; idle releases the user's keys.
+            wants_hotkeys = state in ("ai", "paused")
+            if wants_hotkeys != engaged["value"]:
+                engaged["value"] = wants_hotkeys
+                poller.set_enabled(wants_hotkeys)
+                if wants_hotkeys:
+                    hotkeys.enable()
+                else:
+                    hotkeys.disable()
         except Exception:
             # A missing visual indicator invalidates the AI control lease.
             controller._fail_open()
@@ -345,6 +369,8 @@ def _build_mcp() -> FastMCP:
             # The border keeps flashing yellow for as long as the user keeps
             # moving the mouse; ownership itself stays with the AI.
             control_overlay.set_flash_source(controller.flash_active)
+            hotkeys.start()
+            poller.start()
             controller.start()
             notifier.start()
             logger.debug("Server started, entering main loop")
@@ -354,6 +380,10 @@ def _build_mcp() -> FastMCP:
             try:
                 controller.stop()
             finally:
+                try:
+                    hotkeys.stop()
+                finally:
+                    poller.stop()
                 try:
                     control_overlay.stop()
                 finally:
