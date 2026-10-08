@@ -55,7 +55,19 @@ def _glow_alpha(depth: int, extent: int = _BORDER) -> int:
     return round(240 * (1 - depth / (extent - 1)) ** 1.4)
 
 
-def _edge_bitmap(width: int, height: int, side: str, color: tuple[int, int, int]) -> bytes:
+# The white idle frame has under one level of contrast against a light theme, so
+# it also draws this hairline along its inner boundary.
+_OUTLINE = (118, 130, 145)
+
+
+def _edge_bitmap(
+    width: int,
+    height: int,
+    side: str,
+    color: tuple[int, int, int],
+    *,
+    hairline: bool = False,
+) -> bytes:
     """Pre-render feathered edges, joining corners at one glow strength."""
     image = Image.new("RGBA", (width, height))
     draw = ImageDraw.Draw(image)
@@ -79,6 +91,20 @@ def _edge_bitmap(width: int, height: int, side: str, color: tuple[int, int, int]
         else:
             x = width - 1 - depth
             draw.line((x, 0, x, height - 1), fill=(*color, alpha))
+    if hairline:
+        # Two pixels at the inner boundary turn an invisible white frame into a
+        # readable edge without changing the frame's colour or its softness.
+        for offset in (0, 1):
+            depth = extent - 1 - offset
+            alpha = 210 - offset * 70
+            if side in ("top", "bottom"):
+                y = depth if side == "top" else height - 1 - depth
+                draw.line((0, y, width - 1, y), fill=(*_OUTLINE, alpha))
+            elif side == "left":
+                draw.line((depth, 0, depth, height - 1), fill=(*_OUTLINE, alpha))
+            else:
+                x = width - 1 - depth
+                draw.line((x, 0, x, height - 1), fill=(*_OUTLINE, alpha))
     return premultiplied_bgra(image, 1.0)
 
 

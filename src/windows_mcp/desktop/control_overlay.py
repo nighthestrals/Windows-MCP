@@ -218,7 +218,14 @@ def _build_layers(
             for x, y, w, h, side in strips:
                 if w and h:
                     layers.append(
-                        _Layer(x, y, w, h, _edge_bitmap(w, h, side, color), f"{index}_{side}")
+                        _Layer(
+                            x,
+                            y,
+                            w,
+                            h,
+                            _edge_bitmap(w, h, side, color, hairline=variant == "idle"),
+                            f"{index}_{side}",
+                        )
                     )
             notice = _notice_bitmap(width, variant)
             if notice is not None:
@@ -589,6 +596,11 @@ def is_healthy() -> bool:
 @contextmanager
 def suspend_for_capture():
     """Serialize captures and wait for the indicator to disappear first."""
+    if _CAPTURABLE:
+        # Tuning mode: our own captures are allowed to show the artwork too, so
+        # the layout can be reviewed from a screenshot.
+        yield
+        return
     with _capture_lock:
         with _lock:
             indicator = _instance
