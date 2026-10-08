@@ -120,8 +120,13 @@
 | `ai`（无活动调用，15 秒租约） | 绿框 + 「AI 刚操作过（15 秒租约）」 | 动手调用刚结束；这不是"任务完成" |
 | 蓝/绿期间鼠标移动 | 整框黄闪 | 你的输入正被暂停 |
 | `paused` | 红框 + 「已暂停」 | 显式暂停 |
-| `ready` / `disabled` / `unavailable` | **无边框** | 只是"连着"而不是"接管"，所以不亮灯 |
+| `ready`（MCP 已连接、空闲） | **暗白框** + 「AI 已连接 · 空闲中」 | 这盏灯的含义是"**这个 MCP 会话活着**"，所以空闲也在 |
+| `ready` + 待重新观察 | **琥珀框** + 「已恢复 · 请先重新观察再继续原任务」 | 暂停后已恢复，等一次 Snapshot |
+| `disabled` / 进程结束 | **无边框** | 框由服务进程绘制，会话结束/进程退出时随之一并消失 |
 
+> 边框由 **Windows-MCP 服务进程自己绘制**：MCP 未启用（进程不存在）就没有框；会话/进程结束，框一并消失；
+> 退出热键触发的 `disabled` 也不显示框。
+>
 > **只读调用完全不接管**：`Screenshot`、`Snapshot`、`DisplayInventory`、`Scrape`、`SemanticInfo`、
 > `Wait`、`WaitFor`，以及 `Clipboard get`、`FileSystem read|list|search|info`、`Process list`、
 > `Registry get|list|read` —— 不租约、不亮灯、不吞输入、不改变状态（`Snapshot` 仍会清除"待重新观察"屏障）。

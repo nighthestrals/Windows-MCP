@@ -70,6 +70,35 @@ _mcp: FastMCP | None = None
 _control_config = ControlConfig()
 _control_notifier: Any | None = None
 
+def _start_parent_watch() -> None:
+    """Exit when the MCP client that spawned this server goes away.
+
+    The indicator is drawn by this process, so a server that outlives its client
+    would leave its frame on screen forever. Waiting on the parent process handle
+    makes the frame disappear together with the session that owns it.
+    """
+    try:
+        import ctypes
+        import os
+        import threading
+
+        kernel32 = ctypes.windll.kernel32
+        parent = os.getppid()
+        if parent <= 0:
+            return
+        handle = kernel32.OpenProcess(0x00100000, False, int(parent))  # SYNCHRONIZE
+        if not handle:
+            return
+
+        def _watch() -> None:
+            kernel32.WaitForSingleObject(handle, 0xFFFFFFFF)
+            os._exit(0)
+
+        threading.Thread(target=_watch, name="windows-mcp-parent-watch", daemon=True).start()
+    except Exception:
+        logger.debug("parent watch unavailable", exc_info=True)
+
+
 instructions = dedent("""
 Windows MCP server provides tools to interact directly with the Windows desktop,
 thus enabling to operate the desktop on the user's behalf.
@@ -321,11 +350,18 @@ def _build_mcp() -> FastMCP:
                     control_overlay.set_mode("lease", generation=generation)
             elif state == "paused":
                 control_overlay.set_mode("paused", generation=generation)
+            elif state == "ready":
+                # The frame marks "this MCP server is alive", which is why the
+                # connected-but-idle state gets the white palette entry. A
+                # read-only call leaves it exactly like this; only an acting
+                # call turns it blue.
+                if status.get("resume_observation_required"):
+                    control_overlay.set_mode("resumed", generation=generation)
+                else:
+                    control_overlay.set_mode("idle", generation=generation)
             else:
-                # ready / disabled / unavailable: connected but not taking over,
-                # so the indicator stays off. It only exists while the AI
-                # actually owns the desktop (blue), holds the lease (green) or
-                # is paused (red), which is what the user asked for.
+                # disabled / unavailable: the server is not taking over, so the
+                # frame goes away -- it disappears together with the session.
                 control_overlay.set_active(False, generation=generation)
             # The exit hotkey stays available whenever the server is connected so
             # an idle session can still be stopped. The pause hotkey is exclusive
@@ -387,6 +423,9 @@ def _build_mcp() -> FastMCP:
         screen_size = desktop.get_screen_size()
 
         watchdog = _start_watchdog(desktop)
+        # The frame is drawn by this process, so make sure it cannot outlive the
+        # MCP client that spawned us.
+        _start_parent_watch()
 
         # Set thresholds before installing input hooks; invalid TOML was rejected at load.
         controller.mouse_takeover_units = _control_config.mouse_takeover_units

@@ -612,7 +612,7 @@ async def test_overlay_callback_never_waits_on_hook_thread(monkeypatch):
             start = time.monotonic()
             callback({"state": state})
             assert time.monotonic() - start < 0.1
-        # Idle and resumed are not takeover states, so no frame is shown.
+        # Connected-but-idle keeps the frame: it marks the live MCP session.
         callback({"state": "ready", "resume_observation_required": True})
         await asyncio.sleep(0.2)
         assert calls == [
@@ -620,8 +620,8 @@ async def test_overlay_callback_never_waits_on_hook_thread(monkeypatch):
             ("mode", "lease"),
             True,
             ("mode", "paused"),
-            False,
-            False,
+            ("mode", "idle"),
+            ("mode", "resumed"),
         ]
 
         elapsed = []
@@ -642,8 +642,8 @@ async def test_overlay_callback_never_waits_on_hook_thread(monkeypatch):
             ("mode", "lease"),
             True,
             ("mode", "paused"),
-            False,
-            False,
+            ("mode", "idle"),
+            ("mode", "resumed"),
             ("mode", "paused"),
         ]
 
