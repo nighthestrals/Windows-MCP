@@ -97,6 +97,55 @@ async def test_gate_blocks_dynamic_tools_but_status_remains_available():
         assert controller.calls == [("begin", "DynamicTool"), ("end", 7)]
 
 
+def test_observe_only_classification():
+    from windows_mcp.tools.control_notifications import _is_observe_only
+
+    assert _is_observe_only("Screenshot", None)
+    assert _is_observe_only("Snapshot", {})
+    assert _is_observe_only("SemanticInfo", {"label": 1})
+    assert _is_observe_only("FileSystem", {"mode": "read"})
+    assert _is_observe_only("Process", {"mode": "list"})
+    assert _is_observe_only("Clipboard", {"mode": "get"})
+    assert not _is_observe_only("FileSystem", {"mode": "write"})
+    assert not _is_observe_only("Process", {"mode": "kill"})
+    assert not _is_observe_only("Clipboard", {"mode": "set"})
+    assert not _is_observe_only("Click", {"label": 3})
+    assert not _is_observe_only("PowerShell", {"command": "ls"})
+
+
+@pytest.mark.asyncio
+async def test_observe_only_calls_never_take_over():
+    """Reading the screen must not lease ownership, flip state or show a frame."""
+    controller = FakeController()
+    mcp = FastMCP("test")
+    mcp.add_middleware(ControlToolGate(controller, ControlNotifier(controller)))
+
+    @mcp.tool(name="Screenshot")
+    def screenshot():
+        return "pixels"
+
+    @mcp.tool(name="FileSystem")
+    def filesystem(mode: str):
+        return f"fs:{mode}"
+
+    @mcp.tool(name="Click")
+    def click():
+        return "clicked"
+
+    async with Client(mcp) as client:
+        assert "pixels" in str((await client.call_tool("Screenshot")).content)
+        assert controller.calls == []
+        assert controller.state == "ready"
+        assert "fs:read" in str((await client.call_tool("FileSystem", {"mode": "read"})).content)
+        assert controller.calls == []
+        # A write mode still takes the full ownership path.
+        await client.call_tool("FileSystem", {"mode": "write"})
+        assert controller.calls == [("begin", "FileSystem"), ("end", 7)]
+        controller.calls.clear()
+        await client.call_tool("Click")
+        assert controller.calls == [("begin", "Click"), ("end", 7)]
+
+
 @pytest.mark.asyncio
 async def test_blocked_payload_says_the_task_survives():
     import json as _json
@@ -563,7 +612,7 @@ async def test_overlay_callback_never_waits_on_hook_thread(monkeypatch):
             start = time.monotonic()
             callback({"state": state})
             assert time.monotonic() - start < 0.1
-        # A resumed session with a pending task must not look idle.
+        # Idle and resumed are not takeover states, so no frame is shown.
         callback({"state": "ready", "resume_observation_required": True})
         await asyncio.sleep(0.2)
         assert calls == [
@@ -571,8 +620,8 @@ async def test_overlay_callback_never_waits_on_hook_thread(monkeypatch):
             ("mode", "lease"),
             True,
             ("mode", "paused"),
-            ("mode", "idle"),
-            ("mode", "resumed"),
+            False,
+            False,
         ]
 
         elapsed = []
@@ -593,8 +642,8 @@ async def test_overlay_callback_never_waits_on_hook_thread(monkeypatch):
             ("mode", "lease"),
             True,
             ("mode", "paused"),
-            ("mode", "idle"),
-            ("mode", "resumed"),
+            False,
+            False,
             ("mode", "paused"),
         ]
 

@@ -321,16 +321,11 @@ def _build_mcp() -> FastMCP:
                     control_overlay.set_mode("lease", generation=generation)
             elif state == "paused":
                 control_overlay.set_mode("paused", generation=generation)
-            elif state == "ready":
-                if status.get("resume_observation_required"):
-                    # Resumed after a pause with a pending task: show the amber
-                    # frame until the model re-reads the desktop.
-                    control_overlay.set_mode("resumed", generation=generation)
-                else:
-                    # Connected but idle: a soft white frame tells the user the
-                    # server is up without implying the AI is doing anything.
-                    control_overlay.set_mode("idle", generation=generation)
             else:
+                # ready / disabled / unavailable: connected but not taking over,
+                # so the indicator stays off. It only exists while the AI
+                # actually owns the desktop (blue), holds the lease (green) or
+                # is paused (red), which is what the user asked for.
                 control_overlay.set_active(False, generation=generation)
             # The exit hotkey stays available whenever the server is connected so
             # an idle session can still be stopped. The pause hotkey is exclusive

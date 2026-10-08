@@ -38,6 +38,40 @@ _BLOCK_GUIDANCE = {
 }
 
 
+# Read-only calls must never take control: they inject no input, so they get no
+# lease, no indicator and no input suppression, and they never flip the control
+# state. Acting calls -- plus the write modes of the multi-mode system tools --
+# still take the full ownership path.
+_OBSERVE_ONLY_TOOLS = frozenset(
+    {
+        "Screenshot",
+        "Snapshot",
+        "DisplayInventory",
+        "Scrape",
+        "SemanticInfo",
+        "Wait",
+        "WaitFor",
+    }
+)
+_OBSERVE_ONLY_MODES = {
+    "Clipboard": frozenset({"get"}),
+    "FileSystem": frozenset({"read", "list", "search", "info"}),
+    "Process": frozenset({"list"}),
+    "Registry": frozenset({"get", "list", "read"}),
+}
+
+
+def _is_observe_only(name: str, arguments: object) -> bool:
+    """True when a call can only read the desktop and never touch it."""
+    if name in _OBSERVE_ONLY_TOOLS:
+        return True
+    modes = _OBSERVE_ONLY_MODES.get(name)
+    if modes is None or not isinstance(arguments, dict):
+        return False
+    mode = arguments.get("mode") or arguments.get("action")
+    return isinstance(mode, str) and mode.strip().lower() in modes
+
+
 @dataclass
 class _Session:
     session: Any
@@ -231,6 +265,7 @@ class ControlToolGate(Middleware):
         name = context.message.name
         if name in ("ControlStatus", "ControlResume"):
             return await call_next(context)
+        observe_only = _is_observe_only(name, getattr(context.message, "arguments", None))
         # Waiting behind an already running external command must not hide a
         # user takeover. Poll ownership while waiting, then recheck under lock.
         from windows_mcp.desktop.control import ControlBlocked
@@ -261,6 +296,14 @@ class ControlToolGate(Middleware):
             except asyncio.TimeoutError:
                 reject_user_state()
         try:
+            if observe_only:
+                # Looking at the screen is not taking over: run the tool with no
+                # lease, no indicator, no input suppression and no state change.
+                result = await call_next(context)
+                if name == "Snapshot":
+                    # A successful fresh observation still clears the resume barrier.
+                    self.controller.note_observed()
+                return result
             try:
                 token = await self._begin_call(name)
             except Exception as exc:
