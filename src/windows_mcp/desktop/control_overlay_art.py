@@ -57,7 +57,7 @@ def _glow_alpha(depth: int, extent: int = _BORDER) -> int:
 
 # The white idle frame has under one level of contrast against a light theme, so
 # it also draws this hairline along its inner boundary.
-_OUTLINE = (118, 130, 145)
+_OUTLINE = (96, 108, 122)
 
 
 def _edge_bitmap(
@@ -94,9 +94,8 @@ def _edge_bitmap(
     if hairline:
         # Two pixels at the inner boundary turn an invisible white frame into a
         # readable edge without changing the frame's colour or its softness.
-        for offset in (0, 1):
+        for offset, alpha in enumerate((255, 235, 165)):
             depth = extent - 1 - offset
-            alpha = 210 - offset * 70
             if side in ("top", "bottom"):
                 y = depth if side == "top" else height - 1 - depth
                 draw.line((0, y, width - 1, y), fill=(*_OUTLINE, alpha))

@@ -48,7 +48,7 @@ _YELLOW = (255, 210, 60)
 _WHITE = (245, 245, 245)
 # The idle frame means "connected, nothing running": keep it clearly dimmer so
 # it never competes with the working colours.
-_IDLE_OPACITY_SCALE = 0.45
+_IDLE_OPACITY_SCALE = 0.9
 # DSH fork indicator variants:
 #   active -> a tool call is executing right now (blue, cursor aura follows)
 #   lease  -> idle 15 s lease after a call, nothing is swallowed (green)
