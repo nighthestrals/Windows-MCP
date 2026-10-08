@@ -88,6 +88,22 @@
       "description": "Re-enables desktop control after the user stopped it with the exit hotkey (Ctrl+Alt+Shift+F12). Call it only when the user explicitly asks to resume; confirm=true is required and the first call afterwards must be Snapshot."
     },
     {
+      "name": "SemanticInfo",
+      "description": "Inspects one UI element by its Snapshot label (name, control type, automation id, enabled state, available accessibility patterns) without moving the cursor."
+    },
+    {
+      "name": "InvokeElement",
+      "description": "Activates a UI element by its Snapshot label through its accessibility pattern (Invoke/SelectionItem/Toggle/Expand) instead of clicking coordinates; never moves the shared cursor."
+    },
+    {
+      "name": "SetElementValue",
+      "description": "Sets a text or value element's content by its Snapshot label through Value/RangeValue/LegacyIAccessible; no cursor movement and no keyboard injection."
+    },
+    {
+      "name": "SelectElement",
+      "description": "Selects a list item, tab, radio button or combo entry by its Snapshot label through SelectionItem/ExpandCollapse/Invoke; never moves the shared cursor."
+    },
+    {
       "name": "App",
       "description": "Manages Windows applications with three modes: 'launch' (opens the prescibed application), 'resize' (adjusts the size/position of a named window or the active window if name is omitted), 'switch' (brings specific window into focus)."
     },

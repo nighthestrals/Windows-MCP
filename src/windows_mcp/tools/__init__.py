@@ -13,6 +13,7 @@ from windows_mcp.tools import (
     process,
     registry,
     scrape,
+    semantic,
     shell,
     snapshot,
 )
@@ -32,6 +33,7 @@ _MODULES = [
     process,
     notification,
     registry,
+    semantic,
 ]
 
 

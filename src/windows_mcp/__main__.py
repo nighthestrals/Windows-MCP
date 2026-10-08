@@ -87,6 +87,10 @@ The user owns the desktop and can interrupt you at any time:
   to continue.
 - ControlStatus reports the current owner, the idle lease and whether a resume
   still needs a fresh observation.
+- For elements that came from a Snapshot, prefer SemanticInfo / InvokeElement /
+  SetElementValue / SelectElement over Click / Type / Move: those drive the
+  element's accessibility pattern and never move the shared mouse cursor, so the
+  user's own mouse work cannot disturb the action.
 """)
 
 

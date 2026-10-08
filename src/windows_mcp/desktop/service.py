@@ -660,6 +660,18 @@ class Desktop:
         except Exception as e:
             logger.exception(f"Failed to bring window to top: {e}")
 
+    def get_node_from_label(self, label: int) -> TreeElementNode:
+        """Return the tree node a label points at (interactive first, then scroll)."""
+        tree_state = self.desktop_state.tree_state
+        if label < 0:
+            raise IndexError(f"Label {label} out of range")
+        if label < len(tree_state.interactive_nodes):
+            return tree_state.interactive_nodes[label]
+        scroll_idx = label - len(tree_state.interactive_nodes)
+        if scroll_idx < len(tree_state.scrollable_nodes):
+            return tree_state.scrollable_nodes[scroll_idx]
+        raise IndexError(f"Label {label} out of range")
+
     def get_coordinates_from_label(self, label: int) -> tuple[int, int]:
         tree_state = self.desktop_state.tree_state
         if label < 0:
