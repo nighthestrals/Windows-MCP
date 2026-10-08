@@ -27,13 +27,16 @@ MOD_SHIFT = 0x0004
 MOD_NOREPEAT = 0x4000
 WM_HOTKEY = 0x0312
 VK_BACK = 0x08
+VK_F12 = 0x7B
 
 PAUSE_ID = 1
 EXIT_ID = 2
 
 # (label, modifiers, virtual key, hotkey id)
 PAUSE_COMBO = ("Ctrl+Backspace", MOD_CONTROL, VK_BACK, PAUSE_ID)
-EXIT_COMBO = ("Ctrl+Alt+Shift+Backspace", MOD_CONTROL | MOD_ALT | MOD_SHIFT, VK_BACK, EXIT_ID)
+# F12, not Backspace: an IME that switches with Alt+Shift makes a Ctrl+Backspace
+# press look like Ctrl+Alt+Shift+Backspace, which fired both hotkeys at once.
+EXIT_COMBO = ("Ctrl+Alt+Shift+F12", MOD_CONTROL | MOD_ALT | MOD_SHIFT, VK_F12, EXIT_ID)
 COMBOS = (PAUSE_COMBO, EXIT_COMBO)
 
 _user32 = ctypes.windll.user32

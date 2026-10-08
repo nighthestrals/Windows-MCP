@@ -11,7 +11,7 @@ def register(mcp, *, get_desktop, get_analytics):
         name="ControlResume",
         description=(
             "Re-enable Windows desktop control after the user stopped it with the "
-            "exit hotkey (Ctrl+Alt+Shift+Backspace). Only call this when the user "
+            "exit hotkey (Ctrl+Alt+Shift+F12). Only call this when the user "
             "explicitly asks to resume. Requires confirm=true. The first tool call "
             "after resuming must be Snapshot."
         ),

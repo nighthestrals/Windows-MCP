@@ -13,13 +13,13 @@ _CURSOR_SIZE = 88
 _NOTICE_GLOW_PAD = 32
 _BREATH_PERIOD_SECONDS = 3.0
 _BREATH_MIN_ALPHA = 140
-_NOTICE_SHORTCUT = "Ctrl + Alt + Shift + Backspace"
+_NOTICE_SHORTCUT = "Ctrl+Backspace"
 # DSH fork: the notice follows the ownership variant and is rendered in Chinese.
 # (title, hint prefix, shortcut, hint suffix)
 _NOTICE_TEXT = {
-    "active": ("AI 正在控制这台电脑", "双击左键或 ", _NOTICE_SHORTCUT, " 暂停"),
-    "lease": ("本轮已完成（15 秒内可能继续）", "双击左键或 ", _NOTICE_SHORTCUT, " 暂停"),
-    "paused": ("已暂停 · 双击左键恢复", "双击左键或按 ", _NOTICE_SHORTCUT, " 恢复"),
+    "active": ("AI 正在控制这台电脑", "按 ", _NOTICE_SHORTCUT, " 或摇一摇鼠标暂停"),
+    "lease": ("本轮已完成（15 秒内可能继续）", "按 ", _NOTICE_SHORTCUT, " 或摇一摇鼠标暂停"),
+    "paused": ("已暂停", "按 ", _NOTICE_SHORTCUT, " 或摇一摇鼠标恢复"),
 }
 _NOTICE_TEXT_FALLBACK = _NOTICE_TEXT["active"]
 # Microsoft YaHei carries both CJK and Latin glyphs; Segoe UI cannot render the

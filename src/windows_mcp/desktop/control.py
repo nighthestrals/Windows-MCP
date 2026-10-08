@@ -480,13 +480,14 @@ class ControlCoordinator:
         self._exit_requested = False
         self._pause_requested = False
         self._resume_requested = False
-        if exit_requested:
-            self.enter_disabled()
-            return
         if pause:
             self.pause_by_user()
         if resume:
             self.resume_by_user()
+        if exit_requested:
+            # Exit last: a single physical burst can match several hotkeys when
+            # the IME holds modifiers, and pausing is the recoverable choice.
+            self.enter_disabled()
 
     def pause_by_user(self) -> bool:
         """Hand the desktop to the user; only an explicit resume leaves this state."""

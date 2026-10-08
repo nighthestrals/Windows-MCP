@@ -16,10 +16,10 @@ def _alpha_at(bgra: bytes, width: int, x: int, y: int) -> int:
 
 
 def test_notice_uses_chinese_copy_per_variant_and_transparent_corners():
-    assert control_overlay_art._NOTICE_SHORTCUT == "Ctrl + Alt + Shift + Backspace"
+    assert control_overlay_art._NOTICE_SHORTCUT == "Ctrl+Backspace"
     assert control_overlay_art._NOTICE_TEXT["active"][0] == "AI 正在控制这台电脑"
     assert control_overlay_art._NOTICE_TEXT["lease"][0].startswith("本轮已完成")
-    assert control_overlay_art._NOTICE_TEXT["paused"][0].startswith("已暂停")
+    assert control_overlay_art._NOTICE_TEXT["paused"][0] == "已暂停"
     notice = control_overlay_art._notice_bitmap(1920)
     assert notice is not None
     width, height, bgra = notice

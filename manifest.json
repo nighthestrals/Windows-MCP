@@ -85,7 +85,7 @@
     },
     {
       "name": "ControlResume",
-      "description": "Re-enables desktop control after the user stopped it with the exit hotkey. Call it only when the user explicitly asks to resume; confirm=true is required and the first call afterwards must be Snapshot."
+      "description": "Re-enables desktop control after the user stopped it with the exit hotkey (Ctrl+Alt+Shift+F12). Call it only when the user explicitly asks to resume; confirm=true is required and the first call afterwards must be Snapshot."
     },
     {
       "name": "App",
