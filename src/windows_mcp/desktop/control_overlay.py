@@ -7,6 +7,7 @@ and wait for an acknowledgement, so a screenshot cannot race a visible frame.
 from contextlib import contextmanager
 import ctypes
 import logging
+import os
 import threading
 import time
 from ctypes import wintypes
@@ -30,6 +31,15 @@ logger = logging.getLogger(__name__)
 _REFRESH_SECONDS = 0.05
 _SW_HIDE = 0
 _WDA_EXCLUDEFROMCAPTURE = 0x00000011
+# Diagnostic escape hatch used while tuning the artwork: set
+# WINDOWS_MCP_INDICATOR_CAPTURABLE=1 to let screen captures include the frame
+# (and its notice panel) instead of hiding it from every capturer.
+_CAPTURABLE = os.environ.get("WINDOWS_MCP_INDICATOR_CAPTURABLE", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
 _BLUE = (45, 145, 255)
 _AMBER = (255, 170, 55)
 _GREEN = (60, 200, 110)
@@ -108,7 +118,9 @@ class _Layer:
         self.opacity: int | None = None
         try:
             flash_overlay._push_bitmap(self.hwnd, x, y, width, height, bgra)
-            if not _user32.SetWindowDisplayAffinity(self.hwnd, _WDA_EXCLUDEFROMCAPTURE):
+            if not _CAPTURABLE and not _user32.SetWindowDisplayAffinity(
+                self.hwnd, _WDA_EXCLUDEFROMCAPTURE
+            ):
                 # Own screenshots are protected by suspend_for_capture. Affinity
                 # varies by Windows compositor and only affects other capturers.
                 logger.warning("display affinity unavailable for AI control indicator")
@@ -216,7 +228,9 @@ def _build_layers(
                 if height <= border + notice_height + 2 * glow_pad:
                     continue
                 notice_x = left + (width - notice_width) // 2
-                notice_y = top + border + glow_pad
+                # DSH fork: the prompt sits flush against the top edge of the
+                # screen; only its soft halo reaches above it.
+                notice_y = top + glow_pad
                 layers.append(
                     _Layer(
                         notice_x - glow_pad,
@@ -554,6 +568,7 @@ def describe() -> dict:
         "generation": indicator.generation,
         "applied": indicator.applied,
         "healthy": is_healthy(),
+        "capturable": _CAPTURABLE,
         "error": f"{type(error).__name__}: {error}" if error else None,
     }
 
