@@ -54,6 +54,8 @@ class HotkeyManager:
         self._last_error = 0
         self._pause_cb: Callable[[], None] | None = None
         self._exit_cb: Callable[[], None] | None = None
+        self._pause_presses = 0
+        self._exit_presses = 0
 
     def configure(self, *, on_pause: Callable[[], None], on_exit: Callable[[], None]) -> None:
         self._pause_cb = on_pause
@@ -91,6 +93,8 @@ class HotkeyManager:
             "last_error": self._last_error,
             "running": bool(self._thread and self._thread.is_alive()),
             "combos": [combo[0] for combo in COMBOS],
+            "pause_presses": self._pause_presses,
+            "exit_presses": self._exit_presses,
         }
 
     def _submit(self, command: str, timeout: float) -> bool:
@@ -136,8 +140,10 @@ class HotkeyManager:
 
     def _dispatch(self, hotkey_id: int) -> None:
         if hotkey_id == PAUSE_ID:
+            self._pause_presses += 1
             callback = self._pause_cb
         elif hotkey_id == EXIT_ID:
+            self._exit_presses += 1
             callback = self._exit_cb
         else:
             callback = None

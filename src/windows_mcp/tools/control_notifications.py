@@ -219,6 +219,7 @@ class ControlToolGate(Middleware):
                 return
             code = {
                 "paused": "USER_PAUSED",
+                "disabled": "CONTROL_DISABLED",
                 "user": "USER_CONTROL",
                 "takeover_pending": "TAKEOVER_PENDING",
             }.get(status["state"], "CONTROL_UNAVAILABLE")

@@ -100,6 +100,7 @@ class CursorPoller:
         self._enabled = False
         self._samples = 0
         self._moves = 0
+        self._shakes = 0
 
     def configure(self, *, on_move: Callable[[], None], on_shake: Callable[[], None]) -> None:
         self._on_move = on_move
@@ -128,6 +129,7 @@ class CursorPoller:
             "running": bool(self._thread and self._thread.is_alive()),
             "samples": self._samples,
             "moves": self._moves,
+            "shakes": self._shakes,
         }
 
     def _run(self) -> None:
@@ -161,6 +163,7 @@ class CursorPoller:
                         except Exception:
                             logger.exception("Cursor move handler failed")
                     if detector.feed(dx, dy, now) and self._on_shake is not None:
+                        self._shakes += 1
                         try:
                             self._on_shake()
                         except Exception:

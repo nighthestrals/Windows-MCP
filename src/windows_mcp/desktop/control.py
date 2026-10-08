@@ -98,6 +98,11 @@ class ControlCoordinator:
         self._gesture_swallow_until = 0.0
         self._user_active_until = 0.0
         self._exit_requested = False
+        # Observability: lets ControlStatus explain a pause/resume the user did
+        # not expect (hotkey repeat vs. an accidental shake).
+        self._pause_events = 0
+        self._resume_events = 0
+        self._disable_events = 0
 
     def subscribe(self, callback: Callable[[dict], None]) -> None:
         with self._lock:
@@ -185,6 +190,9 @@ class ControlCoordinator:
             "resume_observation_required": self._resume_observation_required,
             "flashing": self._flash_until > now,
             "user_active": self._user_active_until > now,
+            "pause_events": self._pause_events,
+            "resume_events": self._resume_events,
+            "disable_events": self._disable_events,
         }
 
     def status(self) -> dict:
@@ -421,6 +429,7 @@ class ControlCoordinator:
     def enter_disabled(self) -> bool:
         """Soft exit: give the desktop back and refuse tools until resumed."""
         with self._lock:
+            self._disable_events += 1
             self.input_ledger.block_new()
             changed = self._set_locked("disabled")
             result = self._snapshot_locked(time.monotonic())
@@ -488,6 +497,7 @@ class ControlCoordinator:
                 return False
             self._fast_takeover = False
             self._fast_pending = False
+            self._pause_events += 1
             self.input_ledger.block_new()
             changed = self._set_locked("paused")
             result = self._snapshot_locked(time.monotonic())
@@ -507,6 +517,7 @@ class ControlCoordinator:
         with self._lock:
             if self._state != "paused":
                 return False
+            self._resume_events += 1
             self._resume_observation_required = True
             self._last_user = 0.0
             self._last_physical_event = 0.0
