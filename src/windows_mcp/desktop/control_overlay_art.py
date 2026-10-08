@@ -19,6 +19,7 @@ _NOTICE_EXIT_SHORTCUT = "Ctrl+Alt+Shift+F12"
 # (title, hint prefix, shortcut, hint suffix)
 _NOTICE_TEXT = {
     "idle": ("AI 已连接 · 空闲中", "按 ", _NOTICE_EXIT_SHORTCUT, " 退出控制"),
+    "resumed": ("已恢复 · 请先重新观察再继续原任务", "下一步：", "Snapshot", " 重新读取桌面"),
     "active": ("AI 正在控制这台电脑", "按 ", _NOTICE_SHORTCUT, " 或摇一摇鼠标暂停"),
     "lease": ("本轮已完成（15 秒内可能继续）", "按 ", _NOTICE_SHORTCUT, " 或摇一摇鼠标暂停"),
     "paused": ("已暂停", "按 ", _NOTICE_SHORTCUT, " 或摇一摇鼠标恢复"),

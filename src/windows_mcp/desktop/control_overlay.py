@@ -48,6 +48,9 @@ _VARIANT_COLORS = {
     "lease": _GREEN,
     "paused": _RED,
     "idle": _WHITE,
+    # Resumed after a pause but the desktop has not been re-read yet: a task is
+    # still pending, so this must not look like the idle frame.
+    "resumed": _AMBER,
     "flash": _YELLOW,
 }
 # Set by __main__ to the coordinator's flash predicate: while it returns True

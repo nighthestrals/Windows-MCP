@@ -15,6 +15,29 @@ from fastmcp.server.middleware import Middleware, MiddlewareContext
 logger = logging.getLogger(__name__)
 
 
+# Every blocked call tells the model that the task survives the interruption, so
+# an interrupted run resumes instead of restarting or reporting failure.
+_BLOCK_GUIDANCE = {
+    "USER_PAUSED": (
+        "用户暂停了桌面控制，任务没有被取消。等用户恢复后先调用 Snapshot 重新观察，"
+        "然后继续原来的任务，不要重头开始。"
+    ),
+    "USER_ACTIVE": (
+        "用户正在操作电脑（移动鼠标）。等他停手约 1.5 秒后继续原来的任务，不要争抢光标。"
+        "任务没有被取消。"
+    ),
+    "RESUME_REQUIRES_OBSERVATION": (
+        "用户已恢复控制，桌面可能已被改动：先调用 Snapshot 重新观察，"
+        "然后继续之前未完成的任务。"
+    ),
+    "CONTROL_DISABLED": (
+        "用户已用退出热键停止电脑控制，任务处于挂起状态而不是失败。"
+        "只有用户明确要求时才调用 ControlResume。"
+    ),
+    "USER_CONTROL": "用户暂时接管了桌面，稍后重试即可，任务没有被取消。",
+}
+
+
 @dataclass
 class _Session:
     session: Any
@@ -173,12 +196,11 @@ class ControlToolGate(Middleware):
 
     @staticmethod
     def _blocked(exc: Exception) -> ToolError:
-        return ToolError(
-            json.dumps(
-                {"code": exc.code, "status": exc.status},
-                ensure_ascii=False,
-            )
-        )
+        payload = {"code": exc.code, "status": exc.status}
+        guidance = _BLOCK_GUIDANCE.get(exc.code)
+        if guidance:
+            payload["message"] = guidance
+        return ToolError(json.dumps(payload, ensure_ascii=False))
 
     async def _begin_call(self, name: str) -> int:
         """Wait for the visible lease off-loop, retaining ownership on cancel."""

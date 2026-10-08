@@ -73,6 +73,20 @@ _control_notifier: Any | None = None
 instructions = dedent("""
 Windows MCP server provides tools to interact directly with the Windows desktop,
 thus enabling to operate the desktop on the user's behalf.
+
+The user owns the desktop and can interrupt you at any time:
+
+- A blocked call reporting USER_PAUSED (the user toggled pause) or USER_ACTIVE
+  (the user is moving the mouse) does NOT cancel your task. Wait, then continue
+  the same task from where it stopped instead of restarting or giving up.
+- After a pause the user resumes with the same toggle. The next call must be
+  Snapshot: the desktop may have changed while the user worked. Observe, then
+  continue the original task.
+- CONTROL_DISABLED means the user stopped desktop control entirely; that task is
+  suspended, not failed. Only call ControlResume when the user explicitly asks
+  to continue.
+- ControlStatus reports the current owner, the idle lease and whether a resume
+  still needs a fresh observation.
 """)
 
 
@@ -304,9 +318,14 @@ def _build_mcp() -> FastMCP:
             elif state == "paused":
                 control_overlay.set_mode("paused", generation=generation)
             elif state == "ready":
-                # Connected but idle: a soft white frame tells the user the
-                # server is up without implying the AI is doing anything.
-                control_overlay.set_mode("idle", generation=generation)
+                if status.get("resume_observation_required"):
+                    # Resumed after a pause with a pending task: show the amber
+                    # frame until the model re-reads the desktop.
+                    control_overlay.set_mode("resumed", generation=generation)
+                else:
+                    # Connected but idle: a soft white frame tells the user the
+                    # server is up without implying the AI is doing anything.
+                    control_overlay.set_mode("idle", generation=generation)
             else:
                 control_overlay.set_active(False, generation=generation)
             # The exit hotkey stays available whenever the server is connected so

@@ -98,6 +98,18 @@ async def test_gate_blocks_dynamic_tools_but_status_remains_available():
 
 
 @pytest.mark.asyncio
+async def test_blocked_payload_says_the_task_survives():
+    import json as _json
+
+    exc = ControlBlocked("USER_PAUSED", {"state": "paused"})
+    payload = _json.loads(str(ControlToolGate._blocked(exc)))
+    assert payload["code"] == "USER_PAUSED"
+    assert "任务没有被取消" in payload["message"]
+    resume = ControlBlocked("RESUME_REQUIRES_OBSERVATION", {"state": "ready"})
+    assert "继续之前未完成的任务" in _json.loads(str(ControlToolGate._blocked(resume)))["message"]
+
+
+@pytest.mark.asyncio
 async def test_ledger_preemption_is_structured_and_releases_tool_lock():
     controller = FakeController()
     step_owner = ControlCoordinator()
@@ -551,8 +563,17 @@ async def test_overlay_callback_never_waits_on_hook_thread(monkeypatch):
             start = time.monotonic()
             callback({"state": state})
             assert time.monotonic() - start < 0.1
+        # A resumed session with a pending task must not look idle.
+        callback({"state": "ready", "resume_observation_required": True})
         await asyncio.sleep(0.2)
-        assert calls == [True, ("mode", "lease"), True, ("mode", "paused"), ("mode", "idle")]
+        assert calls == [
+            True,
+            ("mode", "lease"),
+            True,
+            ("mode", "paused"),
+            ("mode", "idle"),
+            ("mode", "resumed"),
+        ]
 
         elapsed = []
 
@@ -573,6 +594,7 @@ async def test_overlay_callback_never_waits_on_hook_thread(monkeypatch):
             True,
             ("mode", "paused"),
             ("mode", "idle"),
+            ("mode", "resumed"),
             ("mode", "paused"),
         ]
 

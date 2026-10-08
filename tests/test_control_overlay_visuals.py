@@ -22,6 +22,8 @@ def test_notice_uses_chinese_copy_per_variant_and_transparent_corners():
     assert control_overlay_art._NOTICE_TEXT["paused"][0] == "已暂停"
     assert control_overlay_art._NOTICE_TEXT["idle"][0] == "AI 已连接 · 空闲中"
     assert control_overlay._VARIANT_COLORS["idle"] == control_overlay._WHITE
+    assert control_overlay._VARIANT_COLORS["resumed"] == control_overlay._AMBER
+    assert control_overlay_art._NOTICE_TEXT["resumed"][0].startswith("已恢复")
     notice = control_overlay_art._notice_bitmap(1920)
     assert notice is not None
     width, height, bgra = notice
