@@ -32,6 +32,10 @@ _FLASH_SECONDS = 0.6
 # cursor poller refreshes it on every sample while the user keeps moving.
 _USER_ACTIVE_SECONDS = 1.5
 
+# A single physical hotkey press can deliver more than one WM_HOTKEY (key repeat
+# or a driver duplicate), which would pause and immediately resume again.
+_PAUSE_TOGGLE_DEBOUNCE_SECONDS = 0.8
+
 
 class ControlBlocked(RuntimeError):
     def __init__(self, code: str, status: dict):
@@ -103,6 +107,7 @@ class ControlCoordinator:
         self._pause_events = 0
         self._resume_events = 0
         self._disable_events = 0
+        self._last_pause_toggle = 0.0
 
     def subscribe(self, callback: Callable[[dict], None]) -> None:
         with self._lock:
@@ -413,12 +418,18 @@ class ControlCoordinator:
 
     def request_pause_toggle(self) -> None:
         """Global pause hotkey or shake gesture: pause or resume."""
+        now = time.monotonic()
+        if now - self._last_pause_toggle < _PAUSE_TOGGLE_DEBOUNCE_SECONDS:
+            # Duplicate delivery of one physical press: ignore it instead of
+            # pausing and resuming again immediately.
+            return
         if self._state == "ai":
             self._pause_requested = True
         elif self._state == "paused":
             self._resume_requested = True
         else:
             return
+        self._last_pause_toggle = now
         self._release_requested.set()
 
     def request_exit(self) -> None:

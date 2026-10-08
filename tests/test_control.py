@@ -445,5 +445,19 @@ def test_pause_toggle_follows_the_ownership_state():
     assert owner._pause_requested is True
     owner._pause_requested = False
     assert owner.pause_by_user() is True
+    owner._last_pause_toggle = 0.0  # Outside the debounce window.
     owner.request_pause_toggle()
     assert owner._resume_requested is True
+
+
+def test_pause_toggle_ignores_duplicate_delivery():
+    owner = ready_controller()
+    owner.begin_call("Wait")
+    owner.request_pause_toggle()
+    assert owner._pause_requested is True
+    owner._pause_requested = False
+    # A driver or key-repeat duplicate of the same press must not toggle again.
+    owner.request_pause_toggle()
+    assert owner._pause_requested is False
+    assert owner._resume_requested is False
+    assert owner._last_pause_toggle > 0.0
