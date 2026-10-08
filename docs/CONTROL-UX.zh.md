@@ -111,3 +111,25 @@
 - MIT 许可，保留原 LICENSE 与作者署名。
 - `main` 持续跟踪 `upstream/main`；本分支只做行为策略与视觉层改动，冲突面集中在 `desktop/control*.py` 与 `tools/control_notifications.py`。
 - 上游升级：`git fetch upstream && git rebase upstream/main`。
+
+## 11. 实现现状（真机验证后）
+
+| 状态 | 边框 | 含义 |
+| --- | --- | --- |
+| `ready` | **白框（暗，45% 透明）** + 面板「AI 已连接 · 空闲中」 | 服务在线但没有活动调用 |
+| `ai`（有活动调用） | 蓝框 + 跟随光标光晕 | AI 正在执行 |
+| `ai`（无活动调用，15 秒租约） | 绿框 | 刚做完，租约期内 |
+| 蓝/绿期间鼠标移动 | 整框黄闪 | 你的输入正被暂停 |
+| `paused` | 红框 + 「已暂停」 | 显式暂停 |
+| `disabled` | 无边框 | 软退出，需 ControlResume |
+
+按键（已在真机验证）：
+
+| 操作 | 行为 |
+| --- | --- |
+| `Ctrl+Backspace` | 暂停 / 恢复（0.8 秒防抖；仅在 AI 持权或暂停期间注册，空闲时归还系统） |
+| `Ctrl+Alt+Shift+F12` | 软退出（原 Ctrl+Alt+Shift+Backspace 会与输入法的 Alt+Shift 冲突，故换 F12） |
+| 摇一摇鼠标 | 与 Ctrl+Backspace 等价（三次方向反转 + 240px 位移） |
+| 恢复后第一次调用 | 必须是 `Snapshot`，否则 `RESUME_REQUIRES_OBSERVATION` |
+
+工具门禁错误码：`USER_PAUSED`、`USER_ACTIVE`、`RESUME_REQUIRES_OBSERVATION`、`CONTROL_DISABLED`。

@@ -303,6 +303,10 @@ def _build_mcp() -> FastMCP:
                     control_overlay.set_mode("lease", generation=generation)
             elif state == "paused":
                 control_overlay.set_mode("paused", generation=generation)
+            elif state == "ready":
+                # Connected but idle: a soft white frame tells the user the
+                # server is up without implying the AI is doing anything.
+                control_overlay.set_mode("idle", generation=generation)
             else:
                 control_overlay.set_active(False, generation=generation)
             # The global hotkeys are exclusive, so they are held only while the

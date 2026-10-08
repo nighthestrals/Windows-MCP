@@ -551,7 +551,7 @@ async def test_overlay_callback_never_waits_on_hook_thread(monkeypatch):
             callback({"state": state})
             assert time.monotonic() - start < 0.1
         await asyncio.sleep(0.2)
-        assert calls == [True, ("mode", "lease"), True, ("mode", "paused"), False]
+        assert calls == [True, ("mode", "lease"), True, ("mode", "paused"), ("mode", "idle")]
 
         elapsed = []
 
@@ -571,7 +571,7 @@ async def test_overlay_callback_never_waits_on_hook_thread(monkeypatch):
             ("mode", "lease"),
             True,
             ("mode", "paused"),
-            False,
+            ("mode", "idle"),
             ("mode", "paused"),
         ]
 

@@ -35,6 +35,10 @@ _AMBER = (255, 170, 55)
 _GREEN = (60, 200, 110)
 _RED = (235, 60, 60)
 _YELLOW = (255, 210, 60)
+_WHITE = (245, 245, 245)
+# The idle frame means "connected, nothing running": keep it clearly dimmer so
+# it never competes with the working colours.
+_IDLE_OPACITY_SCALE = 0.45
 # DSH fork indicator variants:
 #   active -> a tool call is executing right now (blue, cursor aura follows)
 #   lease  -> idle 15 s lease after a call, nothing is swallowed (green)
@@ -43,6 +47,7 @@ _VARIANT_COLORS = {
     "active": _BLUE,
     "lease": _GREEN,
     "paused": _RED,
+    "idle": _WHITE,
     "flash": _YELLOW,
 }
 # Set by __main__ to the coordinator's flash predicate: while it returns True
@@ -388,6 +393,8 @@ class _Indicator:
                             visible = False
                     else:
                         opacity = _breath_opacity(time.monotonic() - breath_started)
+                        if variant == "idle":
+                            opacity = round(opacity * _IDLE_OPACITY_SCALE)
                         for layer in layers:
                             if layer.breathes:
                                 layer.set_opacity(opacity)
