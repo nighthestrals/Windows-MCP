@@ -116,21 +116,23 @@
 
 | 状态 | 边框 | 含义 |
 | --- | --- | --- |
-| `ready` + 待重新观察 | **琥珀框** + 「已恢复 · 请先重新观察再继续原任务」 | 暂停后已恢复，任务仍挂着，等一次 Snapshot |
-| `ready` | **白框（暗，45% 透明）** + 「AI 已连接 · 空闲中」 | 服务在线、没有待办任务 |
-| `ai`（有活动调用） | 蓝框 + 跟随光标光晕 | AI 正在执行 |
-| `ai`（无活动调用，15 秒租约） | 绿框 | 刚做完，租约期内 |
+| `ai`（有活动调用） | 蓝框 + 跟随光标光晕 | AI 正在执行一次**会改动桌面**的调用 |
+| `ai`（无活动调用，15 秒租约） | 绿框 + 「AI 刚操作过（15 秒租约）」 | 动手调用刚结束；这不是"任务完成" |
 | 蓝/绿期间鼠标移动 | 整框黄闪 | 你的输入正被暂停 |
 | `paused` | 红框 + 「已暂停」 | 显式暂停 |
-| `disabled` | 无边框 | 软退出，需 ControlResume |
+| `ready` / `disabled` / `unavailable` | **无边框** | 只是"连着"而不是"接管"，所以不亮灯 |
+
+> **只读调用完全不接管**：`Screenshot`、`Snapshot`、`DisplayInventory`、`Scrape`、`SemanticInfo`、
+> `Wait`、`WaitFor`，以及 `Clipboard get`、`FileSystem read|list|search|info`、`Process list`、
+> `Registry get|list|read` —— 不租约、不亮灯、不吞输入、不改变状态（`Snapshot` 仍会清除"待重新观察"屏障）。
+> 指示灯只在 AI 真正接管 I/O 时出现。
 
 按键（已在真机验证）：
 
 | 操作 | 行为 |
 | --- | --- |
 | `Ctrl+Backspace` | 暂停 / 恢复（0.8 秒防抖；仅在 AI 持权或暂停期间注册，空闲时归还系统） |
-| `Ctrl+Alt+Shift+F12` | 软退出；**只要服务在线就常驻注册**（空闲时也能退出），disabled 时注销 |
-| `Ctrl+Alt+Shift+F12` | 软退出（原 Ctrl+Alt+Shift+Backspace 会与输入法的 Alt+Shift 冲突，故换 F12） |
+| `Ctrl+Alt+Shift+F12` | 软退出；**只要服务在线就常驻注册**（空闲时也能退出），disabled 时注销。原设计用 `Ctrl+Alt+Shift+Backspace`，因输入法的 Alt+Shift 冲突改用 F12 |
 | 摇一摇鼠标 | 与 Ctrl+Backspace 等价（三次方向反转 + 240px 位移） |
 | 恢复后第一次调用 | 必须是 `Snapshot`，否则 `RESUME_REQUIRES_OBSERVATION` |
 
