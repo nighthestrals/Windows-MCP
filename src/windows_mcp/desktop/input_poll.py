@@ -24,7 +24,10 @@ logger = logging.getLogger(__name__)
 POLL_SECONDS = 0.016
 MOVE_EPSILON_PIXELS = 2
 SHAKE_WINDOW_SECONDS = 1.2
-SHAKE_MIN_REVERSALS = 3
+# Deliberately strict: a stray back-and-forth while clicking a button must not
+# toggle the pause, so the gesture needs both many reversals and real travel.
+SHAKE_MIN_REVERSALS = 4
+SHAKE_MIN_TRAVEL_PIXELS = 240
 SHAKE_COOLDOWN_SECONDS = 1.0
 
 _user32 = ctypes.windll.user32
@@ -42,12 +45,15 @@ class ShakeDetector:
         self,
         window: float = SHAKE_WINDOW_SECONDS,
         min_reversals: int = SHAKE_MIN_REVERSALS,
+        min_travel: float = SHAKE_MIN_TRAVEL_PIXELS,
         cooldown: float = SHAKE_COOLDOWN_SECONDS,
     ) -> None:
         self.window = window
         self.min_reversals = min_reversals
+        self.min_travel = min_travel
         self.cooldown = cooldown
         self._reversals: list[float] = []
+        self._travel: list[tuple[float, float]] = []
         self._last_sign = 0
         # Negative infinity so the first gesture is never suppressed by the
         # cooldown, whatever clock the caller uses.
@@ -55,6 +61,7 @@ class ShakeDetector:
 
     def reset(self) -> None:
         self._reversals.clear()
+        self._travel.clear()
         self._last_sign = 0
 
     def feed(self, dx: float, dy: float, now: float) -> bool:
@@ -65,13 +72,19 @@ class ShakeDetector:
         if self._last_sign and sign != self._last_sign:
             self._reversals.append(now)
         self._last_sign = sign
-        self._reversals = [stamp for stamp in self._reversals if now - stamp <= self.window]
+        self._travel.append((now, abs(dx)))
+        cutoff = now - self.window
+        self._reversals = [stamp for stamp in self._reversals if stamp >= cutoff]
+        self._travel = [entry for entry in self._travel if entry[0] >= cutoff]
+        travel = sum(distance for _stamp, distance in self._travel)
         if (
             len(self._reversals) >= self.min_reversals
+            and travel >= self.min_travel
             and now - self._last_trigger >= self.cooldown
         ):
             self._last_trigger = now
             self._reversals.clear()
+            self._travel.clear()
             return True
         return False
 

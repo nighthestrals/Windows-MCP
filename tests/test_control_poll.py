@@ -4,23 +4,27 @@ from windows_mcp import input_activity
 from windows_mcp.desktop import input_poll
 
 
-def test_shake_detector_needs_three_reversals_inside_the_window():
+def test_shake_detector_needs_four_reversals_and_real_travel():
     detector = input_poll.ShakeDetector()
-    assert detector.feed(10, 0, 0.0) is False
-    assert detector.feed(-10, 0, 0.1) is False  # first reversal
-    assert detector.feed(10, 0, 0.2) is False  # second reversal
-    assert detector.feed(-10, 0, 0.3) is True  # third reversal completes it
+    samples = ((100, 0.0), (-100, 0.1), (100, 0.2), (-100, 0.3), (100, 0.4))
+    results = [detector.feed(dx, 0, now) for dx, now in samples]
+    assert results == [False, False, False, False, True]
     # The cooldown suppresses an immediate repeat.
-    assert detector.feed(10, 0, 0.4) is False
-    assert detector.feed(-10, 0, 0.5) is False
-    assert detector.feed(10, 0, 0.6) is False
+    assert detector.feed(-100, 0, 0.5) is False
+    assert detector.feed(100, 0, 0.6) is False
+
+
+def test_shake_detector_ignores_short_reversals_without_travel():
+    detector = input_poll.ShakeDetector()
+    for index in range(10):
+        assert detector.feed(10 if index % 2 else -10, 0, index * 0.05) is False
 
 
 def test_shake_detector_forgets_reversals_outside_the_window():
     detector = input_poll.ShakeDetector()
-    detector.feed(10, 0, 0.0)
-    detector.feed(-10, 0, 0.1)
-    assert detector.feed(10, 0, 5.0) is False
+    detector.feed(100, 0, 0.0)
+    detector.feed(-100, 0, 0.1)
+    assert detector.feed(100, 0, 5.0) is False
 
 
 def test_shake_detector_ignores_sub_epsilon_jitter():
