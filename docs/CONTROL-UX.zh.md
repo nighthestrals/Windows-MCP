@@ -125,7 +125,11 @@
 | `disabled` / 进程结束 | **无边框** | 框由服务进程绘制，会话结束/进程退出时随之一并消失 |
 
 > 边框由 **Windows-MCP 服务进程自己绘制**：MCP 未启用（进程不存在）就没有框；会话/进程结束，框一并消失；
-> 退出热键触发的 `disabled` 也不显示框。
+> 退出热键触发的 `disabled` 也不显示框。父进程看门狗会在 MCP 客户端消失时让服务进程退出，避免孤儿框。
+>
+> ⚠️ 指示灯窗口设置了 `WDA_EXCLUDEFROMCAPTURE`（`control_overlay.py:111`），所以它**不会出现在任何截图里**
+> （包括 AI 自己的 `Screenshot`/`Snapshot`）——这是刻意的：指示灯不污染模型看到的画面。
+> 想确认指示灯是否正确绘制，读 `ControlStatus` 的 `indicator` 字段（`started/active/mode/healthy`），或者用眼睛看。
 >
 > **只读调用完全不接管**：`Screenshot`、`Snapshot`、`DisplayInventory`、`Scrape`、`SemanticInfo`、
 > `Wait`、`WaitFor`，以及 `Clipboard get`、`FileSystem read|list|search|info`、`Process list`、

@@ -540,6 +540,24 @@ def set_pending(pending: bool, *, generation: int | None = None) -> bool:
     return True
 
 
+def describe() -> dict:
+    """Report the indicator state so ControlStatus can show whether it is drawn."""
+    with _lock:
+        indicator = _instance
+    if indicator is None:
+        return {"started": False, "active": False, "mode": None, "error": None}
+    error = indicator.error
+    return {
+        "started": True,
+        "active": bool(indicator.active),
+        "mode": indicator.mode,
+        "generation": indicator.generation,
+        "applied": indicator.applied,
+        "healthy": is_healthy(),
+        "error": f"{type(error).__name__}: {error}" if error else None,
+    }
+
+
 def is_healthy() -> bool:
     """Reject an alive but stalled window owner after one second."""
     with _lock:

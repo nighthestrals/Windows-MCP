@@ -35,4 +35,10 @@ def register(mcp, *, get_desktop, get_analytics):
             status["cursor_poll"] = get_poller().status()
         except Exception:
             pass
+        try:
+            from windows_mcp.desktop import control_overlay
+
+            status["indicator"] = control_overlay.describe()
+        except Exception:
+            pass
         return status

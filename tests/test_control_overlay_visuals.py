@@ -15,6 +15,22 @@ def _alpha_at(bgra: bytes, width: int, x: int, y: int) -> int:
     return bgra[(y * width + x) * 4 + 3]
 
 
+def test_describe_reports_no_indicator_before_start():
+    from windows_mcp.desktop import control_overlay
+
+    saved = control_overlay._instance
+    control_overlay._instance = None
+    try:
+        assert control_overlay.describe() == {
+            "started": False,
+            "active": False,
+            "mode": None,
+            "error": None,
+        }
+    finally:
+        control_overlay._instance = saved
+
+
 def test_notice_uses_chinese_copy_per_variant_and_transparent_corners():
     assert control_overlay_art._NOTICE_SHORTCUT == "Ctrl+Backspace"
     assert control_overlay_art._NOTICE_TEXT["active"][0] == "AI 正在控制这台电脑"
