@@ -54,6 +54,19 @@ def test_enable_registers_both_combos_and_disable_releases_them(manager):
     assert instance.status()["conflicts"] == []
 
 
+def test_idle_mode_keeps_only_the_exit_hotkey(manager):
+    instance, fake = manager
+    assert instance.enable(pause=False) is True
+    assert set(fake.registered) == {hotkeys.EXIT_ID}
+    status = instance.status()
+    assert status["registered"] is True
+    assert status["pause_registered"] is False
+    # Ctrl+Backspace must be back with the application while the AI is idle.
+    assert instance.enable(pause=True) is True
+    assert set(fake.registered) == {hotkeys.PAUSE_ID, hotkeys.EXIT_ID}
+    assert instance.status()["pause_registered"] is True
+
+
 def test_conflicting_combo_is_reported_not_hidden(manager):
     instance, fake = manager
     fake.fail_for.add(hotkeys.PAUSE_ID)

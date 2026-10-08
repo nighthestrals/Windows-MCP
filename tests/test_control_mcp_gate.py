@@ -489,7 +489,8 @@ async def test_overlay_callback_never_waits_on_hook_thread(monkeypatch):
         def stop(self):
             pass
 
-        def enable(self):
+        def enable(self, *, pause=True):
+            self.pause = pause
             return True
 
         def disable(self):

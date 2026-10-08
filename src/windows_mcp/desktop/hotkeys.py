@@ -53,12 +53,15 @@ class HotkeyManager:
         self._commands: list[str] = []
         self._acks = 0
         self._registered = False
+        self._pause_registered = False
+        self._pause_wanted = True
         self._conflicts: list[str] = []
         self._last_error = 0
         self._pause_cb: Callable[[], None] | None = None
         self._exit_cb: Callable[[], None] | None = None
         self._pause_presses = 0
         self._exit_presses = 0
+        self._disabled_all = True
 
     def configure(self, *, on_pause: Callable[[], None], on_exit: Callable[[], None]) -> None:
         self._pause_cb = on_pause
@@ -83,8 +86,9 @@ class HotkeyManager:
         if thread:
             thread.join(timeout=2.0)
 
-    def enable(self, timeout: float = 2.0) -> bool:
-        return self._submit("enable", timeout)
+    def enable(self, *, pause: bool = True, timeout: float = 2.0) -> bool:
+        """Register the exit hotkey always and the pause hotkey on request."""
+        return self._submit("enable:pause" if pause else "enable:exit", timeout)
 
     def disable(self, timeout: float = 2.0) -> bool:
         return self._submit("disable", timeout)
@@ -92,6 +96,8 @@ class HotkeyManager:
     def status(self) -> dict:
         return {
             "registered": self._registered,
+            "pause_registered": self._pause_registered,
+            "exit_registered": self._registered and not self._disabled_all,
             "conflicts": list(self._conflicts),
             "last_error": self._last_error,
             "running": bool(self._thread and self._thread.is_alive()),
@@ -125,8 +131,8 @@ class HotkeyManager:
                 commands, self._commands = self._commands, []
             for command in commands:
                 try:
-                    if command == "enable":
-                        self._do_enable()
+                    if command.startswith("enable"):
+                        self._do_enable(pause=command.endswith("pause"))
                     else:
                         self._do_disable()
                 except Exception:
@@ -159,24 +165,39 @@ class HotkeyManager:
         except Exception:
             logger.exception("Global hotkey callback failed")
 
-    def _do_enable(self) -> None:
+    def _do_enable(self, *, pause: bool) -> None:
         conflicts: list[str] = []
         last_error = 0
+        registered_exit = False
+        registered_pause = False
         for label, modifiers, virtual_key, hotkey_id in COMBOS:
+            wanted = hotkey_id == EXIT_ID or pause
             _user32.UnregisterHotKey(None, hotkey_id)
+            if not wanted:
+                continue
             ctypes.set_last_error(0)
-            if not _user32.RegisterHotKey(None, hotkey_id, modifiers | MOD_NOREPEAT, virtual_key):
+            if _user32.RegisterHotKey(None, hotkey_id, modifiers | MOD_NOREPEAT, virtual_key):
+                if hotkey_id == EXIT_ID:
+                    registered_exit = True
+                else:
+                    registered_pause = True
+            else:
                 last_error = ctypes.get_last_error()
                 conflicts.append(label)
                 logger.warning("Global hotkey %s unavailable (error %d)", label, last_error)
         self._conflicts = conflicts
         self._last_error = last_error
-        self._registered = True
+        self._registered = registered_exit
+        self._pause_registered = registered_pause
+        self._pause_wanted = pause
+        self._disabled_all = False
 
     def _do_disable(self) -> None:
         for _label, _modifiers, _virtual_key, hotkey_id in COMBOS:
             _user32.UnregisterHotKey(None, hotkey_id)
         self._registered = False
+        self._pause_registered = False
+        self._disabled_all = True
         self._conflicts = []
 
 

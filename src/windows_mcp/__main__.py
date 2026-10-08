@@ -279,7 +279,7 @@ def _build_mcp() -> FastMCP:
         on_move=controller.mark_user_move,
         on_shake=controller.request_pause_toggle,
     )
-    engaged = {"value": False}
+    engaged = {"value": "none"}
 
     def apply_control_state(status: dict) -> None:
         try:
@@ -309,16 +309,23 @@ def _build_mcp() -> FastMCP:
                 control_overlay.set_mode("idle", generation=generation)
             else:
                 control_overlay.set_active(False, generation=generation)
-            # The global hotkeys are exclusive, so they are held only while the
-            # AI owns the desktop or is paused; idle releases the user's keys.
-            wants_hotkeys = state in ("ai", "paused")
-            if wants_hotkeys != engaged["value"]:
-                engaged["value"] = wants_hotkeys
-                poller.set_enabled(wants_hotkeys)
-                if wants_hotkeys:
-                    hotkeys.enable()
-                else:
+            # The exit hotkey stays available whenever the server is connected so
+            # an idle session can still be stopped. The pause hotkey is exclusive
+            # and is therefore held only while the AI owns the desktop or is
+            # paused, which keeps Ctrl+Backspace usable for editing when idle.
+            if state in ("ai", "paused"):
+                wanted = "all"
+            elif state == "disabled":
+                wanted = "none"
+            else:
+                wanted = "exit"
+            if wanted != engaged["value"]:
+                engaged["value"] = wanted
+                poller.set_enabled(wanted == "all")
+                if wanted == "none":
                     hotkeys.disable()
+                else:
+                    hotkeys.enable(pause=wanted == "all")
         except Exception:
             # A missing visual indicator invalidates the AI control lease.
             controller._fail_open()

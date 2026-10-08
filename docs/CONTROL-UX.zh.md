@@ -128,6 +128,7 @@
 | 操作 | 行为 |
 | --- | --- |
 | `Ctrl+Backspace` | 暂停 / 恢复（0.8 秒防抖；仅在 AI 持权或暂停期间注册，空闲时归还系统） |
+| `Ctrl+Alt+Shift+F12` | 软退出；**只要服务在线就常驻注册**（空闲时也能退出），disabled 时注销 |
 | `Ctrl+Alt+Shift+F12` | 软退出（原 Ctrl+Alt+Shift+Backspace 会与输入法的 Alt+Shift 冲突，故换 F12） |
 | 摇一摇鼠标 | 与 Ctrl+Backspace 等价（三次方向反转 + 240px 位移） |
 | 恢复后第一次调用 | 必须是 `Snapshot`，否则 `RESUME_REQUIRES_OBSERVATION` |
