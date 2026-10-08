@@ -250,16 +250,17 @@ def test_multimonitor_creates_narrow_clickthrough_layers(monkeypatch):
     assert made[0][:4] == (-1920, 0, 1920, border)
     assert made[2][:4] == (-1920, border, border, 1080 - 2 * border)
     assert made[3][:4] == (-border, border, border, 1080 - 2 * border)
-    assert made[4][1] == border and made[4][4:] == ("0_notice_glow", True)
-    assert made[5][1] == border + control_overlay_art._NOTICE_GLOW_PAD
+    # The prompt sits flush against the top edge: its halo starts at y=0.
+    assert made[4][1] == 0 and made[4][4:] == ("0_notice_glow", True)
+    assert made[5][1] == control_overlay_art._NOTICE_GLOW_PAD
     assert made[5][4:] == ("0_notice", False)
     assert made[4][0] == made[5][0] - control_overlay_art._NOTICE_GLOW_PAD
     assert abs((made[5][0] + made[5][2] / 2) - (-1920 / 2)) <= 1
     assert made[6][:4] == (0, 0, 2560, border)
     assert made[8][:4] == (0, border, border, 1440 - 2 * border)
     assert made[9][:4] == (2560 - border, border, border, 1440 - 2 * border)
-    assert made[10][1] == border and made[10][4:] == ("1_notice_glow", True)
-    assert made[11][1] == border + control_overlay_art._NOTICE_GLOW_PAD
+    assert made[10][1] == 0 and made[10][4:] == ("1_notice_glow", True)
+    assert made[11][1] == control_overlay_art._NOTICE_GLOW_PAD
     assert made[11][4:] == ("1_notice", False)
     assert abs((made[11][0] + made[11][2] / 2) - 1280) <= 1
     assert all(
