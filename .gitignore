@@ -172,3 +172,6 @@ node_modules
 experiment
 .tau
 .pi
+pytest-of-nightmare/
+comtypes-gen-*.lock
+*.log

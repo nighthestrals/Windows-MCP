@@ -57,6 +57,12 @@ class FakeController:
         if self.state != "ai":
             raise ControlBlocked("CONTROL_PREEMPTED", self.status())
 
+    def requires_observation(self):
+        return False
+
+    def note_observed(self):
+        pass
+
 
 @pytest.mark.asyncio
 async def test_gate_blocks_dynamic_tools_but_status_remains_available():
@@ -415,6 +421,9 @@ async def test_overlay_callback_never_waits_on_hook_thread(monkeypatch):
         def visible_ack_required(self):
             return self.sync_visible
 
+        def flash_active(self):
+            return False
+
     class Desktop:
         tree = type("Tree", (), {"on_focus_change": lambda *args: None})()
 
@@ -450,43 +459,53 @@ async def test_overlay_callback_never_waits_on_hook_thread(monkeypatch):
     monkeypatch.setattr(control_overlay, "set_active", slow_show)
     monkeypatch.setattr(
         control_overlay,
+        "set_mode",
+        lambda mode, *, generation=None: calls.append(("mode", mode)),
+    )
+    monkeypatch.setattr(
+        control_overlay,
         "set_pending",
-        lambda active, *, generation=None: calls.append(active),
+        lambda active, *, generation=None: calls.append(("pending", active)),
     )
 
     mcp = wm._build_mcp()
     callback = controller.listeners[0]
     async with mcp._lifespan(mcp):
         assert controller.health_probe is control_overlay.is_healthy
-        # begin_call runs on the server loop and must wait for the indicator.
+        # begin_call runs on the server loop and must wait for the blue border.
         start = time.monotonic()
-        callback({"state": "ai"})
+        callback({"state": "ai", "active_calls": 1})
         assert time.monotonic() - start >= 0.14
         assert calls == [True]
+
+        # The idle lease only recolours the border and never waits.
+        start = time.monotonic()
+        callback({"state": "ai", "active_calls": 0})
+        assert time.monotonic() - start < 0.1
+        assert calls == [True, ("mode", "lease")]
 
         # A ControlStatus-triggered visual update must not block the server loop.
         controller.sync_visible = False
         start = time.monotonic()
-        callback({"state": "ai"})
+        callback({"state": "ai", "active_calls": 1})
         assert time.monotonic() - start < 0.1
         await asyncio.sleep(0.2)
-        assert calls == [True, True]
+        assert calls == [True, ("mode", "lease"), True]
 
-        # A normal tool can advance user -> ready on the event loop. Its
-        # visual acknowledgement must not delay other MCP calls.
+        # User states are scheduled instead of awaited on the event loop.
         controller.sync_visible = True
-        for state in ("user", "ready"):
+        for state in ("paused", "ready"):
             start = time.monotonic()
             callback({"state": state})
             assert time.monotonic() - start < 0.1
         await asyncio.sleep(0.2)
-        assert calls == [True, True, False, False]
+        assert calls == [True, ("mode", "lease"), True, ("mode", "paused"), False]
 
         elapsed = []
 
         def from_hook_thread():
             start = time.monotonic()
-            callback({"state": "user"})
+            callback({"state": "paused"})
             elapsed.append(time.monotonic() - start)
 
         thread = threading.Thread(target=from_hook_thread)
@@ -495,7 +514,14 @@ async def test_overlay_callback_never_waits_on_hook_thread(monkeypatch):
         thread.join(timeout=1)
         assert elapsed and elapsed[0] < 0.1
         await asyncio.sleep(0.2)
-        assert calls == [True, True, False, False, False]
+        assert calls == [
+            True,
+            ("mode", "lease"),
+            True,
+            ("mode", "paused"),
+            False,
+            ("mode", "paused"),
+        ]
 
         monkeypatch.setattr(
             control_overlay,
@@ -503,7 +529,7 @@ async def test_overlay_callback_never_waits_on_hook_thread(monkeypatch):
             lambda active, *, generation=None: (_ for _ in ()).throw(RuntimeError("lost")),
         )
         controller.sync_visible = True
-        callback({"state": "ai"})
+        callback({"state": "ai", "active_calls": 1})
         assert controller.fail_count == 1
 
 

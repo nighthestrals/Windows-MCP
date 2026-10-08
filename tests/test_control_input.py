@@ -155,22 +155,25 @@ def test_fail_open_releases_before_slow_health_probe(monkeypatch):
     assert not watcher.is_alive()
 
 
-def test_takeover_after_checkpoint_blocks_new_ai_down(monkeypatch):
+def test_movement_after_checkpoint_keeps_the_ledger_open(monkeypatch):
     owner = ready_controller()
     token = owner.begin_call("Drag")
     owner.checkpoint(token)
     monkeypatch.setattr(control._user32, "CallNextHookEx", lambda *args: 7)
     data = control._MouseHookData()
+    # Movement is swallowed while the call is live, but it never invalidates the
+    # lease, so the AI must still be able to inject its own input.
     assert owner._physical_mouse(0, 0x200, ctypes.addressof(data)) == 1
-    assert owner._fast_pending
-    with pytest.raises(InputUnavailable, match="unavailable"):
-        owner.input_ledger.press(
-            "mouse:left", lambda: pytest.fail("late AI down"), lambda: None, lambda: False
-        )
+    assert not owner._fast_pending
+    actions = []
+    owner.input_ledger.press(
+        "mouse:left", lambda: actions.append("down"), lambda: None, lambda: False
+    )
+    owner.input_ledger.release("mouse:left")
+    assert actions == ["down"]
     owner._handle(owner._events.get_nowait())
-    assert owner.status()["state"] == "takeover_pending"
-    with pytest.raises(control.ControlBlocked):
-        owner.checkpoint(token)
+    assert owner.status()["state"] == "ai"
+    owner.checkpoint(token)
 
 
 @pytest.mark.parametrize("action", ["scroll", "drag", "multi_select"])
@@ -205,17 +208,12 @@ def test_takeover_between_checkpoint_and_press_injects_no_down(monkeypatch, acti
     assert owner.input_ledger.pending() == ()
 
 
-def test_new_lease_reenables_ledger_after_cancelled_mouse_candidate():
+def test_movement_does_not_close_the_ledger():
     owner = ready_controller()
     token = owner.begin_call("Move")
-    owner.input_ledger.block_new()  # Physical move's immediate guard.
     owner._handle(("point", 0, 0, 0x200))
-    assert owner.status()["state"] == "takeover_pending"
-    owner._last_move -= 0.4
     assert owner.status()["state"] == "ai"
-    with pytest.raises(control.ControlBlocked):
-        owner.checkpoint(token)
-    owner.begin_call("Click")
+    owner.checkpoint(token)
     actions = []
     owner.input_ledger.press(
         "mouse:left", lambda: actions.append("down"), lambda: actions.append("up"), lambda: False
@@ -293,7 +291,7 @@ def test_recovery_requires_ledger_clear_health_and_interactive_desktop(monkeypat
     assert owner.input_ledger.pending() == ()
 
 
-def test_preemption_reports_executed_steps():
+def test_pause_reports_executed_steps():
     owner = ready_controller()
     token = owner.begin_call("Type")
     context = control.current_token.set(token)
@@ -301,9 +299,10 @@ def test_preemption_reports_executed_steps():
     try:
         owner.record_step_current()
         owner.record_step_current()
-        owner._handle(("hotkey",))
+        owner.pause_by_user()
         with pytest.raises(control.ControlBlocked) as exc:
             owner.checkpoint_current()
+        assert exc.value.code == "USER_PAUSED"
         assert exc.value.status["executed_steps"] == 2
     finally:
         control.current_steps.reset(step_context)

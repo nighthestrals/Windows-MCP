@@ -130,9 +130,13 @@ class ControlNotifier:
         previous, current = self._state, status["state"]
         self._state = current
         event = None
-        if current == "user" and previous in ("ready", "ai", "takeover_pending"):
+        if current == "paused" and previous in ("ready", "ai", "takeover_pending"):
+            event = "USER_PAUSED"
+        elif current == "user" and previous in ("ready", "ai", "takeover_pending"):
             event = "USER_CONTROL"
-        elif current == "ready" and previous == "user":
+        elif current == "ready" and previous in ("user", "paused"):
+            event = "AI_CONTROL_AVAILABLE"
+        elif current == "ai" and previous == "paused":
             event = "AI_CONTROL_AVAILABLE"
         if event is None:
             return
@@ -211,17 +215,22 @@ class ControlToolGate(Middleware):
 
         def reject_user_state() -> None:
             status = self.controller.status()
-            if status["state"] not in ("ready", "ai"):
-                raise self._blocked(
-                    ControlBlocked(
-                        {"user": "USER_CONTROL", "takeover_pending": "TAKEOVER_PENDING"}.get(
-                            status["state"], "CONTROL_UNAVAILABLE"
-                        ),
-                        status,
-                    )
-                )
+            if status["state"] in ("ready", "ai"):
+                return
+            code = {
+                "paused": "USER_PAUSED",
+                "user": "USER_CONTROL",
+                "takeover_pending": "TAKEOVER_PENDING",
+            }.get(status["state"], "CONTROL_UNAVAILABLE")
+            raise self._blocked(ControlBlocked(code, status))
 
         reject_user_state()
+        if self.controller.requires_observation() and name != "Snapshot":
+            # The user changed the desktop while paused, so every element id and
+            # coordinate the model remembers is stale: force a fresh look first.
+            raise self._blocked(
+                ControlBlocked("RESUME_REQUIRES_OBSERVATION", self.controller.status())
+            )
         while True:
             try:
                 await asyncio.wait_for(self._call_lock.acquire(), timeout=0.1)
@@ -250,7 +259,11 @@ class ControlToolGate(Middleware):
                 # A synchronous indicator failure can invalidate the lease
                 # during begin_call's state notification.
                 self.controller.checkpoint(token)
-                return await call_next(context)
+                result = await call_next(context)
+                if name == "Snapshot":
+                    # A successful fresh observation clears the resume barrier.
+                    self.controller.note_observed()
+                return result
             except Exception as exc:
                 from windows_mcp.desktop.control import ControlBlocked
                 from windows_mcp.desktop.control_ledger import InputUnavailable

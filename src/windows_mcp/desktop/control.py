@@ -7,7 +7,6 @@ or a failed event queue releases physical input in the hook itself.
 from __future__ import annotations
 
 import ctypes
-import math
 import queue
 import threading
 import time
@@ -23,6 +22,11 @@ from windows_mcp.desktop.control_win32 import (
     _interactive_desktop,
     run_input_monitor,
 )
+
+# Seconds the yellow "your input is held" warning keeps flashing after the last
+# physical mouse movement. The hook refreshes it on every move, so continuous
+# movement keeps the warning on screen.
+_FLASH_SECONDS = 0.6
 
 
 class ControlBlocked(RuntimeError):
@@ -79,6 +83,15 @@ class ControlCoordinator:
         self._key_callback = None
         self._window_callback = None
         self._rotate = False
+        # DSH fork: an explicit user gesture (double click / hotkey) is the only
+        # way out of "ai"; mouse movement only flashes the indicator.
+        self._pause_requested = False
+        self._resume_requested = False
+        self._resume_observation_required = False
+        self._flash_until = 0.0
+        self._last_click_at = 0.0
+        self._last_click_pos = (0, 0)
+        self._gesture_swallow_until = 0.0
 
     def subscribe(self, callback: Callable[[dict], None]) -> None:
         with self._lock:
@@ -152,7 +165,20 @@ class ControlCoordinator:
             if state == "user"
             else 0.0
         )
-        return {"state": state, "generation": self._generation, "wait_seconds": wait}
+        lease = (
+            max(0.0, self._lease_until - now)
+            if state == "ai" and not self._active_calls
+            else 0.0
+        )
+        return {
+            "state": state,
+            "generation": self._generation,
+            "wait_seconds": wait,
+            "active_calls": self._active_calls,
+            "lease_seconds_remaining": round(lease, 3),
+            "resume_observation_required": self._resume_observation_required,
+            "flashing": self._flash_until > now,
+        }
 
     def status(self) -> dict:
         if self._emergency:
@@ -204,14 +230,14 @@ class ControlCoordinator:
         return True
 
     def _tick_locked(self, now: float) -> bool:
-        if self._state == "ready" and now - self._last_physical_event < 10.0:
-            self._last_user = self._last_physical_event
-            return self._set_locked("user")
+        if self._state == "paused":
+            # Only an explicit resume gesture leaves the paused state.
+            return False
         if (
             self._state == "user"
             and not self._pressed
             and not self._mouse_down
-            and now - max(self._last_user, self._last_physical_event) >= 10.0
+            and now - self._last_user >= 10.0
         ):
             return self._set_locked("ready")
         if (
@@ -223,9 +249,8 @@ class ControlCoordinator:
                 "ai" if self._active_calls or now < self._lease_until else "ready"
             )
         if self._state == "ai" and not self._active_calls and now >= self._lease_until:
-            if now - self._last_physical_event < 10.0:
-                self._last_user = self._last_physical_event
-                return self._set_locked("user")
+            # Incidental mouse movement never parks the AI in a cooldown: in this
+            # fork only an explicit gesture changes ownership.
             return self._set_locked("ready")
         return False
 
@@ -246,9 +271,11 @@ class ControlCoordinator:
                 or self._state not in ("ready", "ai")
             ):
                 status = self._snapshot_locked(now)
-                code = {"user": "USER_CONTROL", "takeover_pending": "TAKEOVER_PENDING"}.get(
-                    status["state"], "CONTROL_UNAVAILABLE"
-                )
+                code = {
+                    "user": "USER_CONTROL",
+                    "takeover_pending": "TAKEOVER_PENDING",
+                    "paused": "USER_PAUSED",
+                }.get(status["state"], "CONTROL_UNAVAILABLE")
                 raise ControlBlocked(code, status)
             try:
                 self.input_ledger.enable()  # Any failed release keeps the lease closed.
@@ -257,10 +284,13 @@ class ControlCoordinator:
                 self._set_locked("unavailable")
                 raise ControlBlocked("CONTROL_UNAVAILABLE", self._snapshot_locked(now)) from None
             changed = self._set_locked("ai") or changed
+            # A call starting inside the idle lease must still re-arm the visible
+            # indicator (blue) and the suppression handshake.
+            became_busy = self._active_calls == 0
             self._active_calls += 1
             token = self._generation
             result = self._snapshot_locked(now)
-        if changed:
+        if changed or became_busy:
             self._begin_notification.active = True
             try:
                 self._notify(result)
@@ -270,6 +300,10 @@ class ControlCoordinator:
 
     def checkpoint(self, token: int) -> None:
         with self._lock:
+            if self._state == "paused":
+                status = self._snapshot_locked(time.monotonic())
+                status["executed_steps"] = get_step_count()
+                raise ControlBlocked("USER_PAUSED", status)
             if (
                 self._state != "ai"
                 or self._generation != token
@@ -311,10 +345,102 @@ class ControlCoordinator:
         return {"left": 1, "right": 2, "middle": 3}[button] in self._delivered_mouse
 
     def end_call(self, token: int) -> None:
+        idle = False
         with self._lock:
             self._active_calls = max(0, self._active_calls - 1)
             if self._state in ("ai", "takeover_pending") and not self._active_calls:
                 self._lease_until = time.monotonic() + 15.0
+                # Idle 15 s lease: the border turns green and physical input is
+                # no longer swallowed even though ownership is still the AI's.
+                idle = True
+                result = self._snapshot_locked(time.monotonic())
+        if idle:
+            self._notify(result)
+
+    def mark_user_move(self) -> None:
+        """Called from the input hook: keep the yellow warning flash alive."""
+        self._flash_until = time.monotonic() + _FLASH_SECONDS
+
+    def flash_active(self) -> bool:
+        return self._flash_until > time.monotonic()
+
+    def requires_observation(self) -> bool:
+        return self._resume_observation_required
+
+    def note_observed(self) -> None:
+        """The model re-read the desktop after a resume; normal work may continue."""
+        with self._lock:
+            if not self._resume_observation_required:
+                return
+            self._resume_observation_required = False
+            self._generation += 1
+            result = self._snapshot_locked(time.monotonic())
+        self._notify(result)
+
+    def request_gesture(self) -> None:
+        """Called from the input hook: schedule the pause/resume toggle."""
+        if self._state == "ai":
+            self._pause_requested = True
+        elif self._state == "paused":
+            self._resume_requested = True
+        else:
+            return
+        self._release_requested.set()
+
+    def _schedule_gesture_locked(self) -> None:
+        if self._state == "ai":
+            self._pause_requested = True
+            self._release_requested.set()
+        elif self._state == "paused":
+            self._resume_requested = True
+            self._release_requested.set()
+
+    def _apply_gesture_requests(self) -> None:
+        pause = self._pause_requested
+        resume = self._resume_requested
+        self._pause_requested = False
+        self._resume_requested = False
+        if pause:
+            self.pause_by_user()
+        if resume:
+            self.resume_by_user()
+
+    def pause_by_user(self) -> bool:
+        """Hand the desktop to the user; only an explicit resume leaves this state."""
+        if self._stop.is_set():
+            return False
+        with self._lock:
+            if self._state not in ("ai", "ready", "user", "takeover_pending"):
+                return False
+            self._fast_takeover = False
+            self._fast_pending = False
+            self.input_ledger.block_new()
+            changed = self._set_locked("paused")
+            result = self._snapshot_locked(time.monotonic())
+        try:
+            # Off the hook thread: a pause may have to lift keys the AI holds.
+            self.input_ledger.release_all()
+        except Exception:
+            self._fail_open()
+            self._mark_unavailable()
+            return False
+        if changed:
+            self._notify(result)
+        return True
+
+    def resume_by_user(self) -> bool:
+        """Leave pause; the next tool call must re-observe before it may act."""
+        with self._lock:
+            if self._state != "paused":
+                return False
+            self._resume_observation_required = True
+            self._last_user = 0.0
+            self._last_physical_event = 0.0
+            changed = self._set_locked("ready")
+            result = self._snapshot_locked(time.monotonic())
+        if changed:
+            self._notify(result)
+        return True
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -344,11 +470,9 @@ class ControlCoordinator:
         self._watchdog.start()
         with self._lock:
             now = time.monotonic()
-            # A new server must not impose a cooldown without physical input.
-            recent_input = self._last_physical_event > 0 and now - self._last_physical_event < 10.0
-            if recent_input:
-                self._last_user = self._last_physical_event
-            self._set_locked("user" if recent_input else "ready")
+            # Movement is not ownership in this fork, so a fresh server always
+            # starts ready instead of inheriting an input cooldown.
+            self._set_locked("ready")
             result = self._snapshot_locked(now)
         self._notify(result)
 
@@ -465,34 +589,17 @@ class ControlCoordinator:
                     # Physical input was delivered while the indicator was not armed.
                     self._last_user = now
                     changed = self._set_locked("user") or changed
-                if kind == "hotkey" and self._state in ("ai", "takeover_pending"):
-                    self._last_user = now
-                    changed = self._set_locked("user") or changed
+                elif kind == "hotkey" and self._state in ("ai", "paused"):
+                    # DSH fork: the takeover chord toggles the explicit pause
+                    # instead of dropping control into an unrecoverable state.
                     self._fast_takeover = False
+                    self._fast_pending = False
+                    self._schedule_gesture_locked()
                 elif kind in ("key", "point", "raw") and self._state in ("ready", "user"):
                     self._last_user = now
                     changed = self._set_locked("user") or changed
-                elif kind == "point" and self._state in ("ai", "takeover_pending"):
-                    if event[3] == 0x200:  # WM_MOUSEMOVE
-                        changed = self._candidate_locked(now) or changed
-                        if self._point_origin is None:
-                            self._point_origin = (event[1], event[2])
-                        ox, oy = self._point_origin
-                        if math.hypot(event[1] - ox, event[2] - oy) >= self.mouse_takeover_pixels:
-                            self._last_user = now
-                            changed = self._set_locked("user") or changed
-                elif kind == "raw" and self._state in ("ai", "takeover_pending"):
-                    changed = self._candidate_locked(now) or changed
-                    device, dx, dy = event[1:]
-                    if self._raw_device is not None and device != self._raw_device:
-                        self._raw_origin.clear()  # A new device starts a new segment.
-                    self._raw_device = device
-                    x, y = self._raw_origin.get(device, (0, 0))
-                    x, y = x + dx, y + dy
-                    self._raw_origin[device] = (x, y)
-                    if math.hypot(x, y) >= self.mouse_takeover_units:
-                        self._last_user = now
-                        changed = self._set_locked("user") or changed
+                # Mouse movement never transfers ownership in this fork: the hook
+                # only flashes the indicator, and the AI keeps working.
             result = self._snapshot_locked(now)
         if changed:
             self._notify(result)
@@ -535,6 +642,11 @@ class ControlCoordinator:
             if self._emergency:
                 self._mark_unavailable()
                 continue
+            if self._pause_requested or self._resume_requested:
+                # Gestures run here, off the hook thread, because a pause may
+                # have to lift AI-held keys with SendInput.
+                self._apply_gesture_requests()
+                continue
             now = time.monotonic()
             try:
                 indicator_ok = self._health_probe is None or self._health_probe()
@@ -557,14 +669,27 @@ class ControlCoordinator:
             if not self._lock.acquire(blocking=False):
                 self._fail_open()
                 continue
+            ticked = False
+            result = None
             try:
-                if self._state == "ai" and self._visual_armed and not self._fast_takeover:
+                if (
+                    self._state == "ai"
+                    and self._visual_armed
+                    and not self._fast_takeover
+                ):
                     self._deadline = now + 1.0
                     self._suppress = True
                 else:
                     self._suppress = False
+                # Expire the idle lease on time so the green border disappears
+                # even when no tool call ticks the state machine.
+                ticked = self._tick_locked(now)
+                if ticked:
+                    result = self._snapshot_locked(now)
             finally:
                 self._lock.release()
+            if ticked and result is not None:
+                self._notify(result)
 
 
 _controller = ControlCoordinator()

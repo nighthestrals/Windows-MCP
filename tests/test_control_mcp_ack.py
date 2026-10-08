@@ -43,6 +43,12 @@ class FakeController:
         if self.state != "ai":
             raise ControlBlocked("CONTROL_PREEMPTED", self.status())
 
+    def requires_observation(self):
+        return False
+
+    def note_observed(self):
+        pass
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cancel_during_ack", [False, True])

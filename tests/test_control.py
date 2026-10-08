@@ -157,7 +157,7 @@ def test_delivered_modifier_lookup_never_iterates_live_hook_set(generic, side):
     assert not owner.physical_key_down(0x41)
 
 
-def test_start_preserves_cooldown_after_real_physical_input(monkeypatch):
+def test_start_ignores_recent_physical_input(monkeypatch):
     owner = control.ControlCoordinator()
     monkeypatch.setattr(control, "_interactive_desktop", lambda: True)
 
@@ -170,45 +170,43 @@ def test_start_preserves_cooldown_after_real_physical_input(monkeypatch):
     monkeypatch.setattr(owner, "_run", run)
     owner.start()
     try:
-        assert owner.status()["state"] == "user"
-        with pytest.raises(control.ControlBlocked, match="USER_CONTROL"):
-            owner.begin_call("Wait")
+        # Movement is not ownership in this fork, so a fresh server starts ready
+        # even when the user touched the mouse a moment ago.
+        assert owner.status()["state"] == "ready"
+        owner.begin_call("Wait")
     finally:
         owner.stop()
 
 
-def test_physical_mouse_pixel_threshold_preempts_only_at_boundary():
+def test_physical_movement_warns_but_never_preempts():
     owner = ready_controller()
-    owner.begin_call("Click")
+    token = owner.begin_call("Click")
+    owner.mark_user_move()
     owner._handle(("point", 100, 100, 0x200))
-    owner._handle(("point", 219, 100, 0x200))
-    assert owner.status()["state"] == "takeover_pending"
-    owner._handle(("point", 220, 100, 0x200))
-    assert owner.status()["state"] == "user"
-    with pytest.raises(control.ControlBlocked) as exc:
-        owner.begin_call("Click")
-    assert exc.value.code == "USER_CONTROL"
+    owner._handle(("point", 2200, 1400, 0x200))
+    assert owner.status()["state"] == "ai"
+    assert owner.status()["flashing"] is True
+    owner.checkpoint(token)  # Movement never takes the lease away.
 
 
-def test_raw_mouse_is_per_device_and_relative():
+def test_raw_mouse_movement_keeps_ownership():
     owner = ready_controller()
-    owner.begin_call("Move")
+    token = owner.begin_call("Move")
     owner._handle(("raw", 1, 119, 0))
     owner._handle(("raw", 2, 119, 0))
-    assert owner.status()["state"] == "takeover_pending"
-    owner._handle(("raw", 2, 1, 0))
-    assert owner.status()["state"] == "user"
+    assert owner.status()["state"] == "ai"
+    owner.checkpoint(token)
 
 
-def test_raw_device_switch_resets_previous_candidate():
+def test_flash_warning_tracks_the_last_physical_move(monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr(control.time, "monotonic", lambda: clock[0])
     owner = ready_controller()
-    owner.begin_call("Move")
-    owner._handle(("raw", 1, 100, 0))
-    owner._handle(("raw", 2, 100, 0))
-    owner._handle(("raw", 1, 100, 0))
-    assert owner.status()["state"] == "takeover_pending"
-    owner._handle(("raw", 1, 20, 0))
-    assert owner.status()["state"] == "user"
+    assert owner.flash_active() is False
+    owner.mark_user_move()
+    assert owner.flash_active() is True
+    clock[0] = 100.0 + control._FLASH_SECONDS + 0.01
+    assert owner.flash_active() is False
 
 
 def test_user_idle_resumes_at_ten_seconds(monkeypatch):
@@ -242,7 +240,7 @@ def test_user_idle_waits_until_held_mouse_is_released(monkeypatch):
     assert owner.status()["state"] == "ready"
 
 
-def test_user_idle_counts_physical_up_before_queue_consumption(monkeypatch):
+def test_physical_up_does_not_extend_the_user_cooldown(monkeypatch):
     clock = [100.0]
     monkeypatch.setattr(control.time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(control._user32, "CallNextHookEx", lambda *args: 7)
@@ -253,15 +251,12 @@ def test_user_idle_counts_physical_up_before_queue_consumption(monkeypatch):
     event = control._KeyHookData()
     event.vkCode = 0x41
     assert owner._physical_key(0, 0x101, ctypes.addressof(event)) == 7
-    # The event remains queued, but the hook timestamp already blocks resume.
-    assert owner.status()["state"] == "user"
-    clock[0] = 120.999
-    assert owner.status()["state"] == "user"
-    clock[0] = 121.0
+    # Incidental key timestamps no longer extend ownership cooldowns; the state
+    # machine's own user deadline is authoritative.
     assert owner.status()["state"] == "ready"
 
 
-def test_pending_does_not_expire_while_mouse_button_is_held(monkeypatch):
+def test_held_mouse_button_does_not_change_ownership(monkeypatch):
     clock = [100.0]
     monkeypatch.setattr(control.time, "monotonic", lambda: clock[0])
     owner = ready_controller()
@@ -269,28 +264,25 @@ def test_pending_does_not_expire_while_mouse_button_is_held(monkeypatch):
     owner._handle(("point", 10, 10, 0x200))
     owner._mouse_down.add(1)
     clock[0] = 101.0
-    assert owner.status()["state"] == "takeover_pending"
+    assert owner.status()["state"] == "ai"
     owner._mouse_down.clear()
     assert owner.status()["state"] == "ai"
 
 
-def test_pending_cancels_without_replaying_stale_call(monkeypatch):
+def test_movement_does_not_cancel_an_owned_call(monkeypatch):
     clock = [100.0]
     monkeypatch.setattr(control.time, "monotonic", lambda: clock[0])
     owner = ready_controller()
     token = owner.begin_call("Type")
     owner._handle(("point", 10, 10, 0x200))
-    with pytest.raises(control.ControlBlocked):
-        owner.checkpoint(token)
+    owner.checkpoint(token)  # Movement never preempts an owned call.
     owner.end_call(token)
     clock[0] = 100.301
     assert owner.status()["state"] == "ai"
-    with pytest.raises(control.ControlBlocked):
-        owner.checkpoint(token)
 
 
 @pytest.mark.parametrize("press_order", [(0x11, 0x12, 0x10, 0x08), (0x10, 0x12, 0x11, 0x08)])
-def test_hotkey_fast_path_releases_before_coordinator_and_quarantines_up(monkeypatch, press_order):
+def test_hotkey_fast_path_requests_pause_and_quarantines_up(monkeypatch, press_order):
     owner = ready_controller()
     owner.begin_call("Type")
     owner._deadline = control.time.monotonic() + 1
@@ -310,8 +302,13 @@ def test_hotkey_fast_path_releases_before_coordinator_and_quarantines_up(monkeyp
         assert send(vk, 0x101) == 1
     assert not owner._quarantine
     owner._handle(("hotkey",))
-    assert owner.status()["state"] == "user"
-    assert send(0x41, 0x100) == 7
+    # The chord schedules the explicit pause instead of dropping control into a
+    # state the user cannot explain.
+    assert owner._pause_requested
+    owner._fast_takeover = False
+    assert owner.pause_by_user() is True
+    assert owner.status()["state"] == "paused"
+    assert send(0x41, 0x100) == 7  # Paused input reaches the application again.
 
 
 def test_backspace_repeat_after_modifiers_does_not_trigger_hotkey(monkeypatch):
@@ -345,17 +342,17 @@ def test_injected_key_passes_and_queue_full_fails_open(monkeypatch):
     assert owner._physical_key(-1, 0x100, ctypes.addressof(injected)) == 7
 
 
-def test_physical_move_pauses_ai_before_event_queue_is_processed(monkeypatch):
+def test_physical_move_is_swallowed_and_only_flashes(monkeypatch):
     owner = ready_controller()
     token = owner.begin_call("Move")
     monkeypatch.setattr(control._user32, "CallNextHookEx", lambda *args: 7)
     data = control._MouseHookData()
     data.pt.x, data.pt.y = 10, 20
     assert owner._physical_mouse(0, 0x200, ctypes.addressof(data)) == 1
-    with pytest.raises(control.ControlBlocked):
-        owner.checkpoint(token)
+    owner.checkpoint(token)  # The AI keeps the desktop while the call runs.
     owner._handle(owner._events.get_nowait())
-    assert owner.status()["state"] == "takeover_pending"
+    assert owner.status()["state"] == "ai"
+    assert owner.status()["flashing"] is True
 
 
 def test_swallowed_physical_down_does_not_skip_ai_release(monkeypatch):
@@ -365,7 +362,8 @@ def test_swallowed_physical_down_does_not_skip_ai_release(monkeypatch):
     data = control._MouseHookData()
     assert owner._physical_mouse(0, 0x201, ctypes.addressof(data)) == 1
     assert not owner.physical_mouse_down("left")
-    owner._handle(("hotkey",))
+    owner.pause_by_user()
+    owner._last_click_at = 0.0  # Keep this click out of the double-click gesture.
     assert owner._physical_mouse(0, 0x201, ctypes.addressof(data)) == 7
     assert owner.physical_mouse_down("left")
     assert owner._physical_mouse(0, 0x202, ctypes.addressof(data)) == 7

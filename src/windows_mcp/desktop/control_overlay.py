@@ -10,6 +10,7 @@ import logging
 import threading
 import time
 from ctypes import wintypes
+from typing import Callable
 
 from windows_mcp.desktop import flash_overlay
 from windows_mcp.desktop.control_overlay_art import (
@@ -31,6 +32,37 @@ _SW_HIDE = 0
 _WDA_EXCLUDEFROMCAPTURE = 0x00000011
 _BLUE = (45, 145, 255)
 _AMBER = (255, 170, 55)
+_GREEN = (60, 200, 110)
+_RED = (235, 60, 60)
+_YELLOW = (255, 210, 60)
+# DSH fork indicator variants:
+#   active -> a tool call is executing right now (blue, cursor aura follows)
+#   lease  -> idle 15 s lease after a call, nothing is swallowed (green)
+#   paused -> the user paused the AI with the double-click gesture (red)
+_VARIANT_COLORS = {
+    "active": _BLUE,
+    "lease": _GREEN,
+    "paused": _RED,
+    "flash": _YELLOW,
+}
+# Set by __main__ to the coordinator's flash predicate: while it returns True
+# the border keeps flashing yellow even though ownership did not change.
+_flash_source: Callable[[], bool] | None = None
+
+
+def set_flash_source(source: Callable[[], bool] | None) -> None:
+    global _flash_source
+    _flash_source = source
+
+
+def _flash_now() -> bool:
+    source = _flash_source
+    if source is None:
+        return False
+    try:
+        return bool(source())
+    except Exception:
+        return False
 
 _user32 = ctypes.windll.user32
 # wintypes.POINT, not flash_overlay._POINT: ctypes.windll caches one user32 object per
@@ -135,11 +167,17 @@ def _monitor_rects() -> tuple[tuple[int, int, int, int], ...]:
 
 
 def _build_layers(
-    rects: tuple[tuple[int, int, int, int], ...], pending: bool
-) -> tuple[list[_Layer], _Layer]:
+    rects: tuple[tuple[int, int, int, int], ...],
+    pending: bool = False,
+    *,
+    variant: str = "active",
+) -> tuple[list[_Layer], _Layer | None]:
     if not rects:
         raise RuntimeError("no display available for AI control indicator")
-    color = _AMBER if pending else _BLUE
+    panel_color = _VARIANT_COLORS.get(variant, _BLUE)
+    # The warning flash recolours the border only: the notice panel keeps the
+    # ownership colour so it never looks like a different state.
+    color = _YELLOW if pending else panel_color
     layers: list[_Layer] = []
     try:
         for index, (left, top, right, bottom) in enumerate(rects):
@@ -162,7 +200,7 @@ def _build_layers(
                     layers.append(
                         _Layer(x, y, w, h, _edge_bitmap(w, h, side, color), f"{index}_{side}")
                     )
-            notice = _notice_bitmap(width)
+            notice = _notice_bitmap(width, variant)
             if notice is not None:
                 notice_width, notice_height, bitmap = notice
                 # Narrow monitors retain the aura without letting its window spill onto a neighbor.
@@ -192,6 +230,10 @@ def _build_layers(
                         breathes=False,
                     )
                 )
+        # Only a live call follows the cursor; the idle lease and the paused
+        # state keep the border clean.
+        if pending or variant != "active":
+            return layers, None
         point = wintypes.POINT()
         if not _user32.GetCursorPos(ctypes.byref(point)):
             raise RuntimeError("cannot locate cursor for AI control indicator")
@@ -217,7 +259,7 @@ class _Indicator:
             target=self._run, name="windows-mcp-control-indicator", daemon=True
         )
         self.active = False
-        self.pending = False
+        self.mode = "active"
         self.suspended = 0
         self.stopping = False
         self.version = 0
@@ -238,6 +280,7 @@ class _Indicator:
         self,
         *,
         active: bool | None = None,
+        mode: str | None = None,
         pending: bool | None = None,
         suspended: int = 0,
         generation: int | None = None,
@@ -257,8 +300,12 @@ class _Indicator:
                 self.generation = generation
             if active is not None:
                 self.active = active
-            if pending is not None:
-                self.pending = pending
+            if mode is not None:
+                self.mode = mode
+            elif pending is not None:
+                # Legacy callers of the amber "takeover check" now get the
+                # yellow warning variant.
+                self.mode = "flash" if pending else "active"
             self.suspended += suspended
             if self.suspended < 0:
                 self.suspended = 0
@@ -300,7 +347,7 @@ class _Indicator:
         layers: list[_Layer] = []
         ring: _Layer | None = None
         rects: tuple[tuple[int, int, int, int], ...] = ()
-        mode: bool | None = None
+        built_key: tuple[str, bool] | None = None
         visible = False
         was_active = False
         breath_started = 0.0
@@ -312,47 +359,50 @@ class _Indicator:
                     self.condition.wait(timeout=_REFRESH_SECONDS)
                     if self.stopping:
                         return
-                    active, pending = self.active, self.pending
+                    active, variant = self.active, self.mode
                     suspended, version = self.suspended, self.version
+                # While the user keeps moving the mouse the coordinator asks for
+                # the yellow warning; the ownership variant itself is unchanged.
+                flashing = bool(_flash_now()) and variant in ("active", "lease")
+                key = (variant, flashing)
                 if active:
                     if not was_active:
                         breath_started = time.monotonic()
                     current_rects = _monitor_rects()
-                    if ring is None or current_rects != rects or mode != pending:
+                    if current_rects != rects or built_key != key:
                         for layer in reversed(layers):
                             layer.close()
                         layers = []
                         if ring:
                             ring.close()
                             ring = None
-                        layers, ring = _build_layers(current_rects, pending)
-                        rects, mode = current_rects, pending
+                        layers, ring = _build_layers(current_rects, flashing, variant=variant)
+                        rects, built_key = current_rects, key
                         visible = False
                     if suspended:
                         if visible:
                             for layer in layers:
                                 layer.hide()
-                            ring.hide()
+                            if ring:
+                                ring.hide()
                             visible = False
                     else:
                         opacity = _breath_opacity(time.monotonic() - breath_started)
                         for layer in layers:
                             if layer.breathes:
                                 layer.set_opacity(opacity)
-                        if not pending:
+                        if ring:
                             ring.set_opacity(opacity)
                         if not visible:
                             for layer in layers:
                                 layer.show()
-                            if not pending:
+                            if ring:
                                 ring.show()
                             visible = True
-                        if not pending:
+                        if ring:
                             point = wintypes.POINT()
                             if _user32.GetCursorPos(ctypes.byref(point)):
                                 ring.move(point.x - _CURSOR_SIZE // 2, point.y - _CURSOR_SIZE // 2)
-                        else:
-                            ring.hide()
                 elif visible:
                     for layer in layers:
                         layer.hide()
@@ -448,7 +498,7 @@ def set_active(active: bool, *, generation: int | None = None) -> bool:
             if not active:
                 return True
             raise RuntimeError("AI control indicator has not started")
-        return indicator.change(active=active, pending=False, generation=generation)
+        return indicator.change(active=active, mode="active", generation=generation)
 
     if active:
         with _capture_lock:
@@ -456,8 +506,22 @@ def set_active(active: bool, *, generation: int | None = None) -> bool:
     return apply()
 
 
+def set_mode(mode: str, *, generation: int | None = None) -> bool:
+    """Show the indicator in one of the ownership variants.
+
+    Variants: "active" (a call is running), "lease" (idle 15 s lease) and
+    "paused" (the user took the desktop back with the pause gesture).
+    """
+    with _capture_lock:
+        with _lock:
+            indicator = _instance
+        if indicator is None:
+            return True
+        return indicator.change(active=True, mode=mode, generation=generation)
+
+
 def set_pending(pending: bool, *, generation: int | None = None) -> bool:
-    """Use amber edge indication without cursor following during takeover check."""
+    """Legacy amber "takeover check" entry point, kept for older callers."""
     with _capture_lock:
         with _lock:
             indicator = _instance

@@ -15,14 +15,15 @@ def _alpha_at(bgra: bytes, width: int, x: int, y: int) -> int:
     return bgra[(y * width + x) * 4 + 3]
 
 
-def test_notice_uses_clear_english_and_transparent_corners():
-    assert control_overlay_art._NOTICE_TITLE == "AI is controlling this computer"
-    assert control_overlay_art._NOTICE_HINT == "Press Ctrl + Alt + Shift + Backspace to take over"
+def test_notice_uses_chinese_copy_per_variant_and_transparent_corners():
     assert control_overlay_art._NOTICE_SHORTCUT == "Ctrl + Alt + Shift + Backspace"
+    assert control_overlay_art._NOTICE_TEXT["active"][0] == "AI 正在控制这台电脑"
+    assert control_overlay_art._NOTICE_TEXT["lease"][0].startswith("本轮已完成")
+    assert control_overlay_art._NOTICE_TEXT["paused"][0].startswith("已暂停")
     notice = control_overlay_art._notice_bitmap(1920)
     assert notice is not None
     width, height, bgra = notice
-    assert 540 <= width < 1920 and height < 120  # No third line remains.
+    assert 300 <= width < 1920 and height < 120  # No third line remains.
     assert len(bgra) == width * height * 4
     # A supersampled rounded mask gives each corner several partial-alpha pixels.
     for x_start in (0, width - 22):

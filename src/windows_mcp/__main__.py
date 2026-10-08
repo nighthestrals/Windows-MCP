@@ -276,12 +276,19 @@ def _build_mcp() -> FastMCP:
             ] != controller.status().get("generation"):
                 return
             generation = status.get("generation")
-            if status["state"] == "ai":
-                applied = control_overlay.set_active(True, generation=generation)
-                if applied and generation is not None:
-                    controller.arm_visible(status["generation"])
-            elif status["state"] == "takeover_pending":
-                control_overlay.set_pending(True, generation=generation)
+            state = status["state"]
+            if state == "ai":
+                # Blue while a call is executing, green for the idle 15 s lease.
+                # The lease never swallows input, so only an active call arms
+                # the visible suppression handshake.
+                if status.get("active_calls", 0):
+                    applied = control_overlay.set_active(True, generation=generation)
+                    if applied and generation is not None:
+                        controller.arm_visible(status["generation"])
+                else:
+                    control_overlay.set_mode("lease", generation=generation)
+            elif state == "paused":
+                control_overlay.set_mode("paused", generation=generation)
             else:
                 control_overlay.set_active(False, generation=generation)
         except Exception:
@@ -335,6 +342,9 @@ def _build_mcp() -> FastMCP:
         try:
             control_overlay.start()
             controller.set_health_probe(control_overlay.is_healthy)
+            # The border keeps flashing yellow for as long as the user keeps
+            # moving the mouse; ownership itself stays with the AI.
+            control_overlay.set_flash_source(controller.flash_active)
             controller.start()
             notifier.start()
             logger.debug("Server started, entering main loop")

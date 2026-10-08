@@ -13,9 +13,30 @@ _CURSOR_SIZE = 88
 _NOTICE_GLOW_PAD = 32
 _BREATH_PERIOD_SECONDS = 3.0
 _BREATH_MIN_ALPHA = 140
-_NOTICE_TITLE = "AI is controlling this computer"
 _NOTICE_SHORTCUT = "Ctrl + Alt + Shift + Backspace"
-_NOTICE_HINT = f"Press {_NOTICE_SHORTCUT} to take over"
+# DSH fork: the notice follows the ownership variant and is rendered in Chinese.
+# (title, hint prefix, shortcut, hint suffix)
+_NOTICE_TEXT = {
+    "active": ("AI 正在控制这台电脑", "双击左键或 ", _NOTICE_SHORTCUT, " 暂停"),
+    "lease": ("本轮已完成（15 秒内可能继续）", "双击左键或 ", _NOTICE_SHORTCUT, " 暂停"),
+    "paused": ("已暂停 · 双击左键恢复", "双击左键或按 ", _NOTICE_SHORTCUT, " 恢复"),
+}
+_NOTICE_TEXT_FALLBACK = _NOTICE_TEXT["active"]
+# Microsoft YaHei carries both CJK and Latin glyphs; Segoe UI cannot render the
+# Chinese notice, so it is only the last resort.
+_TITLE_FONT_CANDIDATES = ("msyhbd.ttc", "msyh.ttc", "simhei.ttf", "seguisb.ttf")
+_HINT_FONT_CANDIDATES = ("msyh.ttc", "msyhl.ttc", "simhei.ttf", "segoeui.ttf")
+
+
+def _load_font(candidates: tuple[str, ...], size: int):
+    """Load the first available TrueType face, falling back to the bitmap font."""
+    font_dir = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
+    for name in candidates:
+        try:
+            return ImageFont.truetype(str(font_dir / name), size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
 
 
 def _breath_opacity(elapsed: float) -> int:
@@ -99,26 +120,27 @@ def _notice_panel_mask(width: int, height: int) -> Image.Image:
     return ImageChops.multiply(_notice_shape_mask(width, height), fade_mask)
 
 
-def _notice_bitmap(screen_width: int) -> tuple[int, int, bytes] | None:
+def _notice_bitmap(
+    screen_width: int, variant: str = "active"
+) -> tuple[int, int, bytes] | None:
     """Render a centered two-line prompt below the upper glow."""
     available_width = screen_width - 32
     if available_width < 200:
         return None
+    title, hint_prefix, shortcut, hint_suffix = _NOTICE_TEXT.get(
+        variant, _NOTICE_TEXT_FALLBACK
+    )
+    hint = f"{hint_prefix}{shortcut}{hint_suffix}"
     horizontal_padding = 32 if screen_width >= 640 else 20
-    font_dir = Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
     # Prefer presentation-sized text, then shrink only when a monitor is narrow.
     for hint_size in range(24, 7, -1):
-        try:
-            title_font = ImageFont.truetype(str(font_dir / "seguisb.ttf"), hint_size + 8)
-            hint_font = ImageFont.truetype(str(font_dir / "segoeui.ttf"), hint_size)
-        except OSError:
-            title_font = hint_font = ImageFont.load_default()
+        title_font = _load_font(_TITLE_FONT_CANDIDATES, hint_size + 8)
+        hint_font = _load_font(_HINT_FONT_CANDIDATES, hint_size)
         measure = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
-        title_box = measure.textbbox((0, 0), _NOTICE_TITLE, font=title_font)
-        hint_box = measure.textbbox((0, 0), _NOTICE_HINT, font=hint_font)
-        hint_prefix, _, hint_suffix = _NOTICE_HINT.partition(_NOTICE_SHORTCUT)
+        title_box = measure.textbbox((0, 0), title, font=title_font)
+        hint_box = measure.textbbox((0, 0), hint, font=hint_font)
         prefix_width = math.ceil(measure.textlength(hint_prefix, font=hint_font))
-        shortcut_width = math.ceil(measure.textlength(_NOTICE_SHORTCUT, font=hint_font))
+        shortcut_width = math.ceil(measure.textlength(shortcut, font=hint_font))
         suffix_width = math.ceil(measure.textlength(hint_suffix, font=hint_font))
         title_width, title_height = title_box[2] - title_box[0], title_box[3] - title_box[1]
         hint_width, hint_height = (
@@ -140,13 +162,13 @@ def _notice_bitmap(screen_width: int) -> tuple[int, int, bytes] | None:
     hint_y = 28 + title_height - hint_box[1]
     draw.text(
         ((width - title_width) // 2 - title_box[0], title_y),
-        _NOTICE_TITLE,
+        title,
         font=title_font,
         fill=(248, 251, 255, 255),
     )
     hint_x = (width - hint_width) // 2
     badge_left = hint_x + prefix_width
-    # A solid black key label separates the takeover shortcut from its sentence.
+    # A solid black key label separates the shortcut from its sentence.
     draw.rounded_rectangle(
         (
             badge_left,
@@ -158,7 +180,7 @@ def _notice_bitmap(screen_width: int) -> tuple[int, int, bytes] | None:
         fill=(0, 0, 0, 255),
     )
     draw.text((hint_x, hint_y), hint_prefix, font=hint_font, fill=(225, 240, 255, 255))
-    draw.text((badge_left + 8, hint_y), _NOTICE_SHORTCUT, font=hint_font, fill=(255, 255, 255, 255))
+    draw.text((badge_left + 8, hint_y), shortcut, font=hint_font, fill=(255, 255, 255, 255))
     draw.text(
         (badge_left + shortcut_width + 16, hint_y),
         hint_suffix,
