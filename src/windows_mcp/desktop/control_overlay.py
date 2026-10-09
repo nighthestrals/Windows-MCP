@@ -45,10 +45,10 @@ _AMBER = (255, 170, 55)
 _GREEN = (60, 200, 110)
 _RED = (235, 60, 60)
 _YELLOW = (255, 210, 60)
-_WHITE = (245, 245, 245)
-# The idle frame means "connected, nothing running": keep it clearly dimmer so
-# it never competes with the working colours.
-_IDLE_OPACITY_SCALE = 0.9
+# Silver reads as a frame on a light theme, where pure white measured one level
+# of contrast and was invisible.
+_SILVER = (184, 190, 197)
+_IDLE_OPACITY_SCALE = 0.8
 # DSH fork indicator variants:
 #   active -> a tool call is executing right now (blue, cursor aura follows)
 #   lease  -> idle 15 s lease after a call, nothing is swallowed (green)
@@ -57,7 +57,7 @@ _VARIANT_COLORS = {
     "active": _BLUE,
     "lease": _GREEN,
     "paused": _RED,
-    "idle": _WHITE,
+    "idle": _SILVER,
     # Resumed after a pause but the desktop has not been re-read yet: a task is
     # still pending, so this must not look like the idle frame.
     "resumed": _AMBER,
@@ -223,7 +223,7 @@ def _build_layers(
                             y,
                             w,
                             h,
-                            _edge_bitmap(w, h, side, color, hairline=variant == "idle"),
+                            _edge_bitmap(w, h, side, color),
                             f"{index}_{side}",
                         )
                     )
@@ -232,12 +232,12 @@ def _build_layers(
                 notice_width, notice_height, bitmap = notice
                 # Narrow monitors retain the aura without letting its window spill onto a neighbor.
                 glow_pad = min(_NOTICE_GLOW_PAD, (width - notice_width) // 2)
-                if height <= border + notice_height + 2 * glow_pad:
+                if height <= notice_height + 2 * glow_pad:
                     continue
                 notice_x = left + (width - notice_width) // 2
-                # DSH fork: the prompt sits flush against the top edge of the
-                # screen; only its soft halo reaches above it.
-                notice_y = top + glow_pad
+                # DSH fork: the prompt is flush with the top edge of the screen,
+                # so the upper half of its halo is clipped away.
+                notice_y = top
                 layers.append(
                     _Layer(
                         notice_x - glow_pad,

@@ -37,7 +37,7 @@ def test_notice_uses_chinese_copy_per_variant_and_transparent_corners():
     assert control_overlay_art._NOTICE_TEXT["lease"][0].startswith("AI 刚操作过")
     assert control_overlay_art._NOTICE_TEXT["paused"][0] == "已暂停"
     assert control_overlay_art._NOTICE_TEXT["idle"][0] == "AI 已连接 · 空闲中"
-    assert control_overlay._VARIANT_COLORS["idle"] == control_overlay._WHITE
+    assert control_overlay._VARIANT_COLORS["idle"] == control_overlay._SILVER
     assert control_overlay._VARIANT_COLORS["resumed"] == control_overlay._AMBER
     assert control_overlay_art._NOTICE_TEXT["resumed"][0].startswith("已恢复")
     notice = control_overlay_art._notice_bitmap(1920)
@@ -250,17 +250,20 @@ def test_multimonitor_creates_narrow_clickthrough_layers(monkeypatch):
     assert made[0][:4] == (-1920, 0, 1920, border)
     assert made[2][:4] == (-1920, border, border, 1080 - 2 * border)
     assert made[3][:4] == (-border, border, border, 1080 - 2 * border)
-    # The prompt sits flush against the top edge: its halo starts at y=0.
-    assert made[4][1] == 0 and made[4][4:] == ("0_notice_glow", True)
-    assert made[5][1] == control_overlay_art._NOTICE_GLOW_PAD
+    # The prompt is flush with the top edge, so its halo window starts above the
+    # screen and is clipped there.
+    assert made[4][1] == -control_overlay_art._NOTICE_GLOW_PAD
+    assert made[4][4:] == ("0_notice_glow", True)
+    assert made[5][1] == 0
     assert made[5][4:] == ("0_notice", False)
     assert made[4][0] == made[5][0] - control_overlay_art._NOTICE_GLOW_PAD
     assert abs((made[5][0] + made[5][2] / 2) - (-1920 / 2)) <= 1
     assert made[6][:4] == (0, 0, 2560, border)
     assert made[8][:4] == (0, border, border, 1440 - 2 * border)
     assert made[9][:4] == (2560 - border, border, border, 1440 - 2 * border)
-    assert made[10][1] == 0 and made[10][4:] == ("1_notice_glow", True)
-    assert made[11][1] == control_overlay_art._NOTICE_GLOW_PAD
+    assert made[10][1] == -control_overlay_art._NOTICE_GLOW_PAD
+    assert made[10][4:] == ("1_notice_glow", True)
+    assert made[11][1] == 0
     assert made[11][4:] == ("1_notice", False)
     assert abs((made[11][0] + made[11][2] / 2) - 1280) <= 1
     assert all(
